@@ -49,9 +49,9 @@ function renderTF(data){
 async function getJSON(path){const r=await fetch(path+'?ts='+Date.now(),{cache:'no-store'});const d=await r.json();if(!r.ok||d.ok===false)throw new Error(d.error||('HTTP '+r.status));return d}
 async function tick(){try{
   const [m,tf]=await Promise.all([getJSON('/api/market'),getJSON('/api/timeframes')]);
-  $('price').textContent=fmt(m.price)+' USD';$('change').textContent=Number.isFinite(+m.change24h)?fmt(m.change24h)+'%':'--';$('score').textContent=m.score;$('signal').textContent=m.signal;$('ema20').textContent=fmt(m.indicators.ema20);$('ema50').textContent=fmt(m.indicators.ema50);$('ema200').textContent=fmt(m.indicators.ema200);$('rsi').textContent=fmt(m.indicators.rsi14);renderTF(tf.timeframes);$('updated').textContent='Cập nhật '+new Date(tf.updatedAt).toLocaleTimeString('vi-VN');$('status').innerHTML='<span class="good">✓ Đã đồng bộ</span> | '+tf.source+' | 5 khung: M5, M15, M30, H1, H4 | '+new Date(tf.updatedAt).toLocaleString('vi-VN');
+  $('price').textContent=fmt(m.price)+' USD';$('change').textContent=Number.isFinite(+m.change24h)?fmt(m.change24h)+'%':'--';$('score').textContent=m.score;$('signal').textContent=m.signal;$('ema20').textContent=fmt(m.indicators.ema20);$('ema50').textContent=fmt(m.indicators.ema50);$('ema200').textContent=fmt(m.indicators.ema200);$('rsi').textContent=fmt(m.indicators.rsi14);renderTF(tf.timeframes);$('updated').textContent='Cập nhật '+new Date(m.updatedAt||tf.updatedAt).toLocaleTimeString('vi-VN');$('status').innerHTML='<span class="good">✓ Đã đồng bộ</span> | '+tf.source+' | 5 khung: M5, M15, M30, H1, H4 | Giá cập nhật '+new Date(m.updatedAt||tf.updatedAt).toLocaleTimeString('vi-VN');
 }catch(e){$('status').innerHTML='<span class="error">Lỗi: '+esc(e.message)+'</span>'}}
-tick();setInterval(tick,15000);addEventListener('resize',()=>document.querySelectorAll('canvas').forEach((c)=>{const i=c.id.startsWith('tf-')?Number(c.id.slice(3)):-1;if(i>=0&&window.__tf)drawCandles(c,window.__tf[i].candles)}));
+tick();setInterval(tick,2000);addEventListener('resize',()=>document.querySelectorAll('canvas').forEach((c)=>{const i=c.id.startsWith('tf-')?Number(c.id.slice(3)):-1;if(i>=0&&window.__tf)drawCandles(c,window.__tf[i].candles)}));
 const oldRender=renderTF;renderTF=(data)=>{window.__tf=data;oldRender(data)};
 </script></body></html>`;
 }
