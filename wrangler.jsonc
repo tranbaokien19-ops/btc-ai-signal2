@@ -1,5 +1,5 @@
 {
   "name": "btc-ai-signal2",
-  "main": "src/worker.js",
+  "main": "src/trade-worker.js",
   "compatibility_date": "2026-08-31"
 }
