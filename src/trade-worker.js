@@ -1,6 +1,7 @@
 import baseWorker from './worker.js';
 import { buildTradePlan } from './strategy.js';
 import { getFiveTimeframes } from './timeframes.js';
+import { page } from './dashboard.js';
 
 const API = 'https://api.exchange.coinbase.com';
 const json = (data, status = 200) => new Response(JSON.stringify(data), {
@@ -30,6 +31,9 @@ async function getCandles(granularity) {
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
+    if (url.pathname === '/') {
+      return new Response(page(), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
+    }
     if (url.pathname === '/api/timeframes') {
       try {
         return json(await getFiveTimeframes());
