@@ -8,7 +8,7 @@ export function page() {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>BTC AI Signal 2</title>
 <style>
-:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#080d1b;color:#eef3ff;font-family:Arial,sans-serif}main{max-width:1400px;margin:auto;padding:28px}h1{margin:0 0 6px;font-size:34px}h2{margin:0;font-size:18px}small,.muted{color:#94a3c5}.top{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;margin-bottom:20px}.badge{border:1px solid #2b3a5e;border-radius:999px;padding:8px 12px;color:#b9c7e8}.grid{display:grid;grid-template-columns:repeat(8,minmax(120px,1fr));gap:12px}.card{background:#121a2f;border:1px solid #293756;border-radius:12px;padding:16px}.metric{font-size:24px;font-weight:700;margin-top:8px}.section{margin-top:18px}.section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.tf-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}.tf{padding:14px}.tf-head{display:flex;justify-content:space-between;align-items:center}.tf-name{font-size:22px;font-weight:700}.trend{font-size:12px;border-radius:999px;padding:5px 8px;border:1px solid #344362}.bull{color:#55dc92}.bear{color:#ff7181}.mixed{color:#f4ca58}.tf-metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.mini{background:#0d1426;border-radius:8px;padding:8px}.mini b{display:block;margin-top:4px}.chart{height:150px;margin-top:12px}.chart canvas{width:100%;height:100%;display:block}.consensus{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}.status{line-height:1.7}.good{color:#55dc92}.warn{color:#f4ca58}.bad{color:#ff7181}.error{color:#ff7181;white-space:pre-wrap}.loading{opacity:.7}@media(max-width:1050px){.grid{grid-template-columns:repeat(4,1fr)}.tf-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:650px){main{padding:14px}h1{font-size:28px}.grid{grid-template-columns:repeat(2,1fr)}.tf-grid,.consensus{grid-template-columns:1fr}.metric{font-size:20px}}
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#080d1b;color:#eef3ff;font-family:Arial,sans-serif}main{max-width:1400px;margin:auto;padding:28px}h1{margin:0 0 6px;font-size:34px}h2{margin:0;font-size:18px}small,.muted{color:#94a3c5}.top{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;margin-bottom:20px}.badge{border:1px solid #2b3a5e;border-radius:999px;padding:8px 12px;color:#b9c7e8}.grid{display:grid;grid-template-columns:repeat(8,minmax(120px,1fr));gap:12px}.card{background:#121a2f;border:1px solid #293756;border-radius:12px;padding:16px}.metric{font-size:24px;font-weight:700;margin-top:8px}.section{margin-top:18px}.section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.tf-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}.tf{padding:14px}.tf-head{display:flex;justify-content:space-between;align-items:center}.tf-name{font-size:22px;font-weight:700}.trend{font-size:12px;border-radius:999px;padding:5px 8px;border:1px solid #344362}.bull{color:#55dc92}.bear{color:#ff7181}.mixed{color:#f4ca58}.live{color:#55dc92;border-color:#55dc92}.tf-metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.mini{background:#0d1426;border-radius:8px;padding:8px}.mini b{display:block;margin-top:4px}.chart{height:150px;margin-top:12px;position:relative}.chart canvas{width:100%;height:100%;display:block}.consensus{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}.status{line-height:1.7}.good{color:#55dc92}.warn{color:#f4ca58}.bad,.error{color:#ff7181}.error{white-space:pre-wrap}.loading{opacity:.7}@media(max-width:1050px){.grid{grid-template-columns:repeat(4,1fr)}.tf-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:650px){main{padding:14px}h1{font-size:28px}.grid{grid-template-columns:repeat(2,1fr)}.tf-grid,.consensus{grid-template-columns:1fr}.metric{font-size:20px}}
 </style>
 </head>
 <body><main>
@@ -32,52 +32,111 @@ const $=(id)=>document.getElementById(id);
 const fmt=(n,d=2)=>Number.isFinite(Number(n))?Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'--';
 const trendClass=(t)=>t==='BULLISH'?'bull':t==='BEARISH'?'bear':'mixed';
 const trendText=(t)=>t==='BULLISH'?'TĂNG':t==='BEARISH'?'GIẢM':'HỖN HỢP';
+const STEP={M5:300,M15:900,M30:1800,H1:3600,H4:14400};
+let liveStore={};
 
-// Coinbase's candle endpoint can lag behind the realtime ticker. Patch the
-// currently-forming candle with the exact realtime price so the chart moves
-// with the price every polling cycle. Historical/closed candles are untouched.
-function patchLiveCandles(timeframes, price){
-  if(!Array.isArray(timeframes)||!Number.isFinite(Number(price))) return timeframes;
+// Keep a persistent client-side candle for each timeframe. The API supplies
+// historical candles, while the realtime ticker supplies the current price.
+// We update the SAME in-progress candle every second instead of replacing it
+// with the lagging exchange candle response.
+function syncLiveCandles(timeframes,price){
   const p=Number(price);
-  const seconds={M5:300,M15:900,M30:1800,H1:3600,H4:14400};
+  if(!Array.isArray(timeframes)||!Number.isFinite(p))return [];
+  const now=Math.floor(Date.now()/1000);
   return timeframes.map(t=>{
-    const arr=Array.isArray(t.candles)?t.candles.map(c=>({...c})):[];
-    const step=seconds[t.timeframe];
-    if(!step||!arr.length) return t;
-    const bucket=Math.floor(Date.now()/1000/step)*step;
-    let last=arr[arr.length-1];
-    if(Number(last.time)!==bucket){
-      last={time:bucket,open:Number(last.close),high:Number(last.close),low:Number(last.close),close:Number(last.close),volume:0};
-      arr.push(last);
+    const step=STEP[t.timeframe];
+    if(!step||!Array.isArray(t.candles)||!t.candles.length)return t;
+    const bucket=Math.floor(now/step)*step;
+    let state=liveStore[t.timeframe];
+    if(!state||state.bucket!==bucket){
+      const arr=t.candles.map(c=>({time:Number(c.time),open:Number(c.open),high:Number(c.high),low:Number(c.low),close:Number(c.close),volume:Number(c.volume)||0}));
+      let current=arr.find(c=>c.time===bucket);
+      if(!current){
+        const prev=arr[arr.length-1];
+        const open=Number.isFinite(prev?.close)?prev.close:p;
+        current={time:bucket,open,high:Math.max(open,p),low:Math.min(open,p),close:p,volume:0};
+        arr.push(current);
+      }else{
+        current.close=p;
+        current.high=Math.max(current.high,p);
+        current.low=Math.min(current.low,p);
+      }
+      liveStore[t.timeframe]={bucket,candles:arr.slice(-120)};
+      state=liveStore[t.timeframe];
+    }else{
+      const arr=state.candles;
+      let current=arr[arr.length-1];
+      if(!current||current.time!==bucket){
+        const open=Number.isFinite(current?.close)?current.close:p;
+        current={time:bucket,open,high:Math.max(open,p),low:Math.min(open,p),close:p,volume:0};
+        arr.push(current);
+      }else{
+        current.close=p;
+        current.high=Math.max(current.high,p);
+        current.low=Math.min(current.low,p);
+      }
+      state.candles=arr.slice(-120);
     }
-    last.close=p;
-    last.high=Math.max(Number(last.high),p);
-    last.low=Math.min(Number(last.low),p);
-    return {...t,close:p,candles:arr};
+    const candles=state.candles;
+    const last=candles[candles.length-1];
+    return {...t,close:last.close,candles};
   });
 }
 
 function drawCandles(canvas,candles){
-  const box=canvas.getBoundingClientRect(),q=devicePixelRatio||1;canvas.width=Math.max(1,Math.floor(box.width*q));canvas.height=Math.max(1,Math.floor(box.height*q));
-  const x=canvas.getContext('2d');x.setTransform(q,0,0,q,0,0);const w=box.width,h=box.height;x.clearRect(0,0,w,h);if(!candles?.length)return;
-  const c=candles.slice(-60),lo=Math.min(...c.map(z=>z.low)),hi=Math.max(...c.map(z=>z.high)),span=hi-lo||1,pad=span*.08,min=lo-pad,max=hi+pad,left=4,right=4,top=8,bottom=8,ww=w-left-right,hh=h-top-bottom,px=i=>left+i*ww/Math.max(1,c.length-1),py=v=>top+(max-v)*hh/(max-min),cw=Math.max(2,ww/c.length*.68);
-  x.strokeStyle='rgba(120,140,180,.16)';x.lineWidth=1;for(let i=1;i<4;i++){const y=top+i*hh/4;x.beginPath();x.moveTo(left,y);x.lineTo(w-right,y);x.stroke()}
-  c.forEach((z,i)=>{const xx=px(i),yo=py(z.open),yc=py(z.close),yh=py(z.high),yl=py(z.low),up=z.close>=z.open,col=up?'#35d07f':'#ff6575';x.strokeStyle=col;x.fillStyle=col;x.lineWidth=1;x.beginPath();x.moveTo(xx,yh);x.lineTo(xx,yl);x.stroke();const y=Math.min(yo,yc),bh=Math.max(2,Math.abs(yc-yo));x.fillRect(xx-cw/2,y,cw,bh)});
+  const box=canvas.getBoundingClientRect(),q=devicePixelRatio||1;
+  canvas.width=Math.max(1,Math.floor(box.width*q));canvas.height=Math.max(1,Math.floor(box.height*q));
+  const x=canvas.getContext('2d');x.setTransform(q,0,0,q,0,0);
+  const w=box.width,h=box.height;x.clearRect(0,0,w,h);if(!candles?.length)return;
+  const c=candles.slice(-60),lo=Math.min(...c.map(z=>z.low)),hi=Math.max(...c.map(z=>z.high)),span=hi-lo||1,pad=span*.08,min=lo-pad,max=hi+pad;
+  const left=4,right=42,top=8,bottom=8,ww=w-left-right,hh=h-top-bottom;
+  const px=i=>left+i*ww/Math.max(1,c.length-1),py=v=>top+(max-v)*hh/(max-min),cw=Math.max(2,ww/c.length*.68);
+  x.strokeStyle='rgba(120,140,180,.16)';x.lineWidth=1;
+  for(let i=1;i<4;i++){const y=top+i*hh/4;x.beginPath();x.moveTo(left,y);x.lineTo(w-right,y);x.stroke()}
+  c.forEach((z,i)=>{
+    const xx=px(i),yo=py(z.open),yc=py(z.close),yh=py(z.high),yl=py(z.low),up=z.close>=z.open;
+    const live=i===c.length-1;
+    const col=up?'#35d07f':'#ff6575';
+    x.strokeStyle=col;x.fillStyle=col;x.lineWidth=live?2:1;
+    x.beginPath();x.moveTo(xx,yh);x.lineTo(xx,yl);x.stroke();
+    const y=Math.min(yo,yc),bh=Math.max(2,Math.abs(yc-yo));x.fillRect(xx-cw/2,y,cw,bh);
+    if(live){x.strokeStyle='#ffffff';x.lineWidth=1;x.strokeRect(xx-cw/2-1,y-1,cw+2,bh+2)}
+  });
+  const live=c[c.length-1],liveY=py(live.close),liveX=px(c.length-1);
+  x.setLineDash([4,4]);x.strokeStyle='rgba(255,255,255,.55)';x.lineWidth=1;x.beginPath();x.moveTo(left,liveY);x.lineTo(w-right,liveY);x.stroke();x.setLineDash([]);
+  x.fillStyle='#ffffff';x.font='10px Arial';x.fillText(fmt(live.close),Math.min(w-right+3,liveX+6),Math.max(11,liveY-4));
 }
+
 function renderTF(data){
-  const grid=$('tfGrid');if(!Array.isArray(data)||!data.length){grid.innerHTML='<div class="card error">Không nhận được dữ liệu 5 khung.</div>';return}
+  const grid=$('tfGrid');
+  if(!Array.isArray(data)||!data.length){grid.innerHTML='<div class="card error">Không nhận được dữ liệu 5 khung.</div>';return}
   let bull=0,bear=0;
-  grid.innerHTML=data.map((t,i)=>{if(t.trend==='BULLISH')bull++;if(t.trend==='BEARISH')bear++;return '<div class="card tf"><div class="tf-head"><span class="tf-name">'+t.timeframe+'</span><span class="trend '+trendClass(t.trend)+'">'+trendText(t.trend)+'</span></div><div class="chart"><canvas id="tf-'+i+'"></canvas></div><div class="tf-metrics"><div class="mini">Giá đóng<b>'+fmt(t.close)+'</b></div><div class="mini">RSI14<b>'+fmt(t.rsi14)+'</b></div><div class="mini">EMA20<b>'+fmt(t.ema20)+'</b></div><div class="mini">EMA50<b>'+fmt(t.ema50)+'</b></div><div class="mini">EMA200<b>'+fmt(t.ema200)+'</b></div><div class="mini">Nến<b>'+(t.candles?.length||0)+'</b></div></div></div>'}).join('');
+  grid.innerHTML=data.map((t,i)=>{
+    if(t.trend==='BULLISH')bull++;if(t.trend==='BEARISH')bear++;
+    return '<div class="card tf"><div class="tf-head"><span class="tf-name">'+t.timeframe+'</span><span class="trend '+trendClass(t.trend)+'">'+trendText(t.trend)+'</span></div><div class="chart"><canvas id="tf-'+i+'"></canvas></div><div class="tf-metrics"><div class="mini">Giá đóng<b>'+fmt(t.close)+'</b></div><div class="mini">RSI14<b>'+fmt(t.rsi14)+'</b></div><div class="mini">EMA20<b>'+fmt(t.ema20)+'</b></div><div class="mini">EMA50<b>'+fmt(t.ema50)+'</b></div><div class="mini">EMA200<b>'+fmt(t.ema200)+'</b></div><div class="mini">Nến<b>'+(t.candles?.length||0)+'</b></div></div></div>'
+  }).join('');
   data.forEach((t,i)=>drawCandles($('tf-'+i),t.candles));
-  $('bullCount').textContent=bull;$('bearCount').textContent=bear;$('consensusTrend').textContent=bull>=4?'TĂNG MẠNH':bear>=4?'GIẢM MẠNH':bull>bear?'NGHIÊNG TĂNG':bear>bull?'NGHIÊNG GIẢM':'TRUNG TÍNH';
+  $('bullCount').textContent=bull;$('bearCount').textContent=bear;
+  $('consensusTrend').textContent=bull>=4?'TĂNG MẠNH':bear>=4?'GIẢM MẠNH':bull>bear?'NGHIÊNG TĂNG':bear>bull?'NGHIÊNG GIẢM':'TRUNG TÍNH';
 }
+
 async function getJSON(path){const r=await fetch(path+'?ts='+Date.now(),{cache:'no-store'});const d=await r.json();if(!r.ok||d.ok===false)throw new Error(d.error||('HTTP '+r.status));return d}
+
 async function tick(){try{
   const [m,tf]=await Promise.all([getJSON('/api/market'),getJSON('/api/timeframes')]);
-  const liveTF=patchLiveCandles(tf.timeframes,m.price);
+  const liveTF=syncLiveCandles(tf.timeframes,m.price);
   window.__tf=liveTF;
-  $('price').textContent=fmt(m.price)+' USD';$('change').textContent=Number.isFinite(+m.change24h)?fmt(m.change24h)+'%':'--';$('score').textContent=m.score;$('signal').textContent=m.signal;$('ema20').textContent=fmt(m.indicators.ema20);$('ema50').textContent=fmt(m.indicators.ema50);$('ema200').textContent=fmt(m.indicators.ema200);$('rsi').textContent=fmt(m.indicators.rsi14);renderTF(liveTF);$('updated').textContent='Cập nhật '+new Date(m.updatedAt||tf.updatedAt).toLocaleTimeString('vi-VN');$('status').innerHTML='<span class="good">✓ Đã đồng bộ</span> | '+tf.source+' | Live candle: '+fmt(m.price)+' | 5 khung: M5, M15, M30, H1, H4 | Giá cập nhật '+new Date(m.updatedAt||tf.updatedAt).toLocaleTimeString('vi-VN');
+  $('price').textContent=fmt(m.price)+' USD';
+  $('change').textContent=Number.isFinite(+m.change24h)?fmt(m.change24h)+'%':'--';
+  $('score').textContent=m.score;$('signal').textContent=m.signal;
+  $('ema20').textContent=fmt(m.indicators.ema20);$('ema50').textContent=fmt(m.indicators.ema50);$('ema200').textContent=fmt(m.indicators.ema200);$('rsi').textContent=fmt(m.indicators.rsi14);
+  renderTF(liveTF);
+  const tm=new Date(m.updatedAt||tf.updatedAt);
+  $('updated').textContent='Cập nhật '+tm.toLocaleTimeString('vi-VN');
+  $('status').innerHTML='<span class="good">✓ Đã đồng bộ</span> | '+tf.source+' | <span class="live">LIVE candle = giá realtime '+fmt(m.price)+'</span> | 5 khung: M5, M15, M30, H1, H4 | Giá cập nhật '+tm.toLocaleTimeString('vi-VN');
 }catch(e){$('status').innerHTML='<span class="error">Lỗi: '+esc(e.message)+'</span>'}}
-tick();setInterval(tick,1000);addEventListener('resize',()=>document.querySelectorAll('canvas').forEach((c)=>{const i=c.id.startsWith('tf-')?Number(c.id.slice(3)):-1;if(i>=0&&window.__tf)drawCandles(c,window.__tf[i].candles)}));
+
+tick();setInterval(tick,1000);
+addEventListener('resize',()=>document.querySelectorAll('canvas').forEach((c)=>{const i=c.id.startsWith('tf-')?Number(c.id.slice(3)):-1;if(i>=0&&window.__tf)drawCandles(c,window.__tf[i].candles)}));
 </script></body></html>`;
 }
