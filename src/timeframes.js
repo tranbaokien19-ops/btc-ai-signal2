@@ -2,49 +2,32 @@ const API = 'https://api.exchange.coinbase.com';
 
 // Coinbase Exchange supports 5m, 15m and 1h natively, but NOT 30m or 4h.
 // M30 is built from M15 candles and H4 is built from H1 candles.
-const NATIVE = {
-  M5: 300,
-  M15: 900,
-  H1: 3600
-};
+const NATIVE = { M5: 300, M15: 900, H1: 3600 };
+const BATCH = 300;
 
-async function getCandles(seconds, count = 300) {
-  const end = Math.floor(Date.now() / 1000);
-  const start = end - seconds * count;
+async function fetchBatch(seconds, endSeconds) {
+  // Use 299 intervals so the inclusive start/end range cannot exceed Coinbase's 300-candle limit.
+  const end = Math.floor(endSeconds);
+  const start = end - (BATCH - 1) * seconds;
   const r = await fetch(`${API}/products/BTC-USD/candles?granularity=${seconds}&start=${new Date(start * 1000).toISOString()}&end=${new Date(end * 1000).toISOString()}`, {
-    headers: { accept: 'application/json', 'user-agent': 'btc-ai-signal2/timeframes-2.0' }
+    headers: { accept: 'application/json', 'user-agent': 'btc-ai-signal2/timeframes-2.1' }
   });
   const text = await r.text();
   if (!r.ok) throw new Error(`Coinbase HTTP ${r.status}: ${text.slice(0, 180)}`);
   const raw = JSON.parse(text);
   if (!Array.isArray(raw)) throw new Error('Coinbase trả dữ liệu nến không hợp lệ');
   return raw.map(x => ({
-    time: Number(x[0]),
-    low: Number(x[1]),
-    high: Number(x[2]),
-    open: Number(x[3]),
-    close: Number(x[4]),
-    volume: Number(x[5])
-  })).filter(x => Object.values(x).every(Number.isFinite)).sort((a, b) => a.time - b.time);
+    time: Number(x[0]), low: Number(x[1]), high: Number(x[2]),
+    open: Number(x[3]), close: Number(x[4]), volume: Number(x[5])
+  })).filter(x => Object.values(x).every(Number.isFinite));
 }
 
 async function getMany(seconds, total) {
   const out = [];
-  const batches = Math.ceil(total / 300);
+  const batches = Math.ceil(total / BATCH);
+  const now = Math.floor(Date.now() / 1000);
   for (let i = batches - 1; i >= 0; i--) {
-    const end = Math.floor(Date.now() / 1000) - i * 300 * seconds;
-    const start = end - 300 * seconds;
-    const r = await fetch(`${API}/products/BTC-USD/candles?granularity=${seconds}&start=${new Date(start * 1000).toISOString()}&end=${new Date(end * 1000).toISOString()}`, {
-      headers: { accept: 'application/json', 'user-agent': 'btc-ai-signal2/timeframes-2.0' }
-    });
-    const text = await r.text();
-    if (!r.ok) throw new Error(`Coinbase HTTP ${r.status}: ${text.slice(0, 180)}`);
-    const raw = JSON.parse(text);
-    if (!Array.isArray(raw)) throw new Error('Coinbase trả dữ liệu nến không hợp lệ');
-    out.push(...raw.map(x => ({
-      time: Number(x[0]), low: Number(x[1]), high: Number(x[2]),
-      open: Number(x[3]), close: Number(x[4]), volume: Number(x[5])
-    })).filter(x => Object.values(x).every(Number.isFinite)));
+    out.push(...await fetchBatch(seconds, now - i * (BATCH - 1) * seconds));
   }
   const seen = new Map();
   for (const c of out) seen.set(c.time, c);
@@ -103,17 +86,13 @@ function analyze(candles) {
     : 'UNKNOWN';
   return {
     close: last?.close ?? null,
-    ema20: e20,
-    ema50: e50,
-    ema200: e200,
-    rsi14: r,
-    trend,
-    candles: candles.slice(-120)
+    ema20: e20, ema50: e50, ema200: e200, rsi14: r,
+    trend, candles: candles.slice(-120)
   };
 }
 
 export async function getFiveTimeframes() {
-  // Enough source candles to calculate EMA200 after aggregation.
+  // 300 M5 + 600 M15 + 900 H1 source candles are enough for EMA200 on every derived timeframe.
   const [m5, m15, h1] = await Promise.all([
     getMany(NATIVE.M5, 300),
     getMany(NATIVE.M15, 600),
@@ -134,7 +113,7 @@ export async function getFiveTimeframes() {
   return {
     ok: true,
     symbol: 'BTCUSDT',
-    source: 'Coinbase BTC-USD (M30/H4 được ghép từ nến gốc)',
+    source: 'Coinbase BTC-USD (M30/H4 ghép từ M15/H1)',
     timeframes: data,
     updatedAt: new Date().toISOString()
   };
