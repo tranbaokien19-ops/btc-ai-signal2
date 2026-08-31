@@ -1,16 +1,15 @@
 const API = 'https://api.exchange.coinbase.com';
 
-// Coinbase Exchange supports 5m, 15m and 1h natively, but NOT 30m or 4h.
-// M30 is built from M15 candles and H4 is built from H1 candles.
+// Coinbase supports 5m, 15m and 1h natively. Build M30 from M15 and H4 from H1.
 const NATIVE = { M5: 300, M15: 900, H1: 3600 };
 const BATCH = 300;
 
 async function fetchBatch(seconds, endSeconds) {
-  // Use 299 intervals so the inclusive start/end range cannot exceed Coinbase's 300-candle limit.
-  const end = Math.floor(endSeconds);
+  const end = Math.floor(endSeconds / seconds) * seconds;
   const start = end - (BATCH - 1) * seconds;
-  const r = await fetch(`${API}/products/BTC-USD/candles?granularity=${seconds}&start=${new Date(start * 1000).toISOString()}&end=${new Date(end * 1000).toISOString()}`, {
-    headers: { accept: 'application/json', 'user-agent': 'btc-ai-signal2/timeframes-2.1' }
+  const url = `${API}/products/BTC-USD/candles?granularity=${seconds}&start=${new Date(start * 1000).toISOString()}&end=${new Date(end * 1000).toISOString()}`;
+  const r = await fetch(url, {
+    headers: { accept: 'application/json', 'user-agent': 'btc-ai-signal2/timeframes-2.2' }
   });
   const text = await r.text();
   if (!r.ok) throw new Error(`Coinbase HTTP ${r.status}: ${text.slice(0, 180)}`);
@@ -23,14 +22,16 @@ async function fetchBatch(seconds, endSeconds) {
 }
 
 async function getMany(seconds, total) {
-  const out = [];
   const batches = Math.ceil(total / BATCH);
-  const now = Math.floor(Date.now() / 1000);
-  for (let i = batches - 1; i >= 0; i--) {
-    out.push(...await fetchBatch(seconds, now - i * (BATCH - 1) * seconds));
+  const now = Math.floor(Date.now() / 1000 / seconds) * seconds;
+  const jobs = [];
+  for (let i = 0; i < batches; i++) {
+    const end = now - i * (BATCH - 1) * seconds;
+    jobs.push(fetchBatch(seconds, end));
   }
+  const chunks = await Promise.all(jobs);
   const seen = new Map();
-  for (const c of out) seen.set(c.time, c);
+  for (const chunk of chunks) for (const c of chunk) seen.set(c.time, c);
   return [...seen.values()].sort((a, b) => a.time - b.time).slice(-total);
 }
 
@@ -92,7 +93,7 @@ function analyze(candles) {
 }
 
 export async function getFiveTimeframes() {
-  // 300 M5 + 600 M15 + 900 H1 source candles are enough for EMA200 on every derived timeframe.
+  // 300 M5, 600 M15 and 900 H1 source candles are enough for EMA200 on all five frames.
   const [m5, m15, h1] = await Promise.all([
     getMany(NATIVE.M5, 300),
     getMany(NATIVE.M15, 600),
@@ -106,7 +107,7 @@ export async function getFiveTimeframes() {
     ['H1', h1],
     ['H4', aggregate(h1, 14400)]
   ].map(([name, candles]) => {
-    if (candles.length < 200) throw new Error(`${name}: không đủ 200 nến sau khi chuẩn hóa (${candles.length})`);
+    if (candles.length < 200) throw new Error(`${name}: không đủ 200 nến hợp lệ (${candles.length})`);
     return { timeframe: name, ...analyze(candles), updatedAt: new Date().toISOString() };
   });
 
