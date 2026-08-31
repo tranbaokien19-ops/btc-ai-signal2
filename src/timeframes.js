@@ -1,15 +1,19 @@
 const API = 'https://api.exchange.coinbase.com';
 
-// Coinbase supports 5m, 15m and 1h natively. Build M30 from M15 and H4 from H1.
+// Coinbase Exchange provides 5m, 15m and 1h candles natively.
+// M30 is built by aggregating two real M15 candles; H4 by aggregating four real H1 candles.
+// EMA is then calculated independently on each resulting timeframe.
 const NATIVE = { M5: 300, M15: 900, H1: 3600 };
 const BATCH = 300;
+const CALC_CANDLES = 300;
+const CHART_CANDLES = 120;
 
 async function fetchBatch(seconds, endSeconds) {
   const end = Math.floor(endSeconds / seconds) * seconds;
   const start = end - (BATCH - 1) * seconds;
   const url = `${API}/products/BTC-USD/candles?granularity=${seconds}&start=${new Date(start * 1000).toISOString()}&end=${new Date(end * 1000).toISOString()}`;
   const r = await fetch(url, {
-    headers: { accept: 'application/json', 'user-agent': 'btc-ai-signal2/timeframes-2.2' }
+    headers: { accept: 'application/json', 'user-agent': 'btc-ai-signal2/timeframes-2.3' }
   });
   const text = await r.text();
   if (!r.ok) throw new Error(`Coinbase HTTP ${r.status}: ${text.slice(0, 180)}`);
@@ -88,25 +92,29 @@ function analyze(candles) {
   return {
     close: last?.close ?? null,
     ema20: e20, ema50: e50, ema200: e200, rsi14: r,
-    trend, candles: candles.slice(-120)
+    trend,
+    candles: candles.slice(-CHART_CANDLES),
+    calcCandles: candles.slice(-CALC_CANDLES)
   };
 }
 
 export async function getFiveTimeframes() {
-  // 300 M5, 600 M15 and 900 H1 source candles are enough for EMA200 on all five frames.
+  // Enough real source candles for a full EMA200 calculation after aggregation.
   const [m5, m15, h1] = await Promise.all([
     getMany(NATIVE.M5, 300),
     getMany(NATIVE.M15, 600),
     getMany(NATIVE.H1, 900)
   ]);
 
-  const data = [
+  const built = [
     ['M5', m5],
     ['M15', m15],
     ['M30', aggregate(m15, 1800)],
     ['H1', h1],
     ['H4', aggregate(h1, 14400)]
-  ].map(([name, candles]) => {
+  ];
+
+  const data = built.map(([name, candles]) => {
     if (candles.length < 200) throw new Error(`${name}: không đủ 200 nến hợp lệ (${candles.length})`);
     return { timeframe: name, ...analyze(candles), updatedAt: new Date().toISOString() };
   });
@@ -114,7 +122,7 @@ export async function getFiveTimeframes() {
   return {
     ok: true,
     symbol: 'BTCUSDT',
-    source: 'Coinbase BTC-USD (M30/H4 ghép từ M15/H1)',
+    source: 'Coinbase BTC-USD | M30 = 2×M15 | H4 = 4×H1',
     timeframes: data,
     updatedAt: new Date().toISOString()
   };
