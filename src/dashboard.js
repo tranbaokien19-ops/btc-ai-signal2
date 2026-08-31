@@ -32,6 +32,31 @@ const $=(id)=>document.getElementById(id);
 const fmt=(n,d=2)=>Number.isFinite(Number(n))?Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'--';
 const trendClass=(t)=>t==='BULLISH'?'bull':t==='BEARISH'?'bear':'mixed';
 const trendText=(t)=>t==='BULLISH'?'TĂNG':t==='BEARISH'?'GIẢM':'HỖN HỢP';
+
+// Coinbase's candle endpoint can lag behind the realtime ticker. Patch the
+// currently-forming candle with the exact realtime price so the chart moves
+// with the price every polling cycle. Historical/closed candles are untouched.
+function patchLiveCandles(timeframes, price){
+  if(!Array.isArray(timeframes)||!Number.isFinite(Number(price))) return timeframes;
+  const p=Number(price);
+  const seconds={M5:300,M15:900,M30:1800,H1:3600,H4:14400};
+  return timeframes.map(t=>{
+    const arr=Array.isArray(t.candles)?t.candles.map(c=>({...c})):[];
+    const step=seconds[t.timeframe];
+    if(!step||!arr.length) return t;
+    const bucket=Math.floor(Date.now()/1000/step)*step;
+    let last=arr[arr.length-1];
+    if(Number(last.time)!==bucket){
+      last={time:bucket,open:Number(last.close),high:Number(last.close),low:Number(last.close),close:Number(last.close),volume:0};
+      arr.push(last);
+    }
+    last.close=p;
+    last.high=Math.max(Number(last.high),p);
+    last.low=Math.min(Number(last.low),p);
+    return {...t,close:p,candles:arr};
+  });
+}
+
 function drawCandles(canvas,candles){
   const box=canvas.getBoundingClientRect(),q=devicePixelRatio||1;canvas.width=Math.max(1,Math.floor(box.width*q));canvas.height=Math.max(1,Math.floor(box.height*q));
   const x=canvas.getContext('2d');x.setTransform(q,0,0,q,0,0);const w=box.width,h=box.height;x.clearRect(0,0,w,h);if(!candles?.length)return;
@@ -49,9 +74,10 @@ function renderTF(data){
 async function getJSON(path){const r=await fetch(path+'?ts='+Date.now(),{cache:'no-store'});const d=await r.json();if(!r.ok||d.ok===false)throw new Error(d.error||('HTTP '+r.status));return d}
 async function tick(){try{
   const [m,tf]=await Promise.all([getJSON('/api/market'),getJSON('/api/timeframes')]);
-  $('price').textContent=fmt(m.price)+' USD';$('change').textContent=Number.isFinite(+m.change24h)?fmt(m.change24h)+'%':'--';$('score').textContent=m.score;$('signal').textContent=m.signal;$('ema20').textContent=fmt(m.indicators.ema20);$('ema50').textContent=fmt(m.indicators.ema50);$('ema200').textContent=fmt(m.indicators.ema200);$('rsi').textContent=fmt(m.indicators.rsi14);renderTF(tf.timeframes);$('updated').textContent='Cập nhật '+new Date(m.updatedAt||tf.updatedAt).toLocaleTimeString('vi-VN');$('status').innerHTML='<span class="good">✓ Đã đồng bộ</span> | '+tf.source+' | 5 khung: M5, M15, M30, H1, H4 | Giá cập nhật '+new Date(m.updatedAt||tf.updatedAt).toLocaleTimeString('vi-VN');
+  const liveTF=patchLiveCandles(tf.timeframes,m.price);
+  window.__tf=liveTF;
+  $('price').textContent=fmt(m.price)+' USD';$('change').textContent=Number.isFinite(+m.change24h)?fmt(m.change24h)+'%':'--';$('score').textContent=m.score;$('signal').textContent=m.signal;$('ema20').textContent=fmt(m.indicators.ema20);$('ema50').textContent=fmt(m.indicators.ema50);$('ema200').textContent=fmt(m.indicators.ema200);$('rsi').textContent=fmt(m.indicators.rsi14);renderTF(liveTF);$('updated').textContent='Cập nhật '+new Date(m.updatedAt||tf.updatedAt).toLocaleTimeString('vi-VN');$('status').innerHTML='<span class="good">✓ Đã đồng bộ</span> | '+tf.source+' | Live candle: '+fmt(m.price)+' | 5 khung: M5, M15, M30, H1, H4 | Giá cập nhật '+new Date(m.updatedAt||tf.updatedAt).toLocaleTimeString('vi-VN');
 }catch(e){$('status').innerHTML='<span class="error">Lỗi: '+esc(e.message)+'</span>'}}
-tick();setInterval(tick,2000);addEventListener('resize',()=>document.querySelectorAll('canvas').forEach((c)=>{const i=c.id.startsWith('tf-')?Number(c.id.slice(3)):-1;if(i>=0&&window.__tf)drawCandles(c,window.__tf[i].candles)}));
-const oldRender=renderTF;renderTF=(data)=>{window.__tf=data;oldRender(data)};
+tick();setInterval(tick,1000);addEventListener('resize',()=>document.querySelectorAll('canvas').forEach((c)=>{const i=c.id.startsWith('tf-')?Number(c.id.slice(3)):-1;if(i>=0&&window.__tf)drawCandles(c,window.__tf[i].candles)}));
 </script></body></html>`;
 }
