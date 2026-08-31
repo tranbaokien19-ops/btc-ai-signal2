@@ -1,5 +1,6 @@
 import baseWorker from './worker.js';
 import { buildTradePlan } from './strategy.js';
+import { getFiveTimeframes } from './timeframes.js';
 
 const API = 'https://api.exchange.coinbase.com';
 const json = (data, status = 200) => new Response(JSON.stringify(data), {
@@ -13,7 +14,7 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), {
 
 async function getCandles(granularity) {
   const r = await fetch(`${API}/products/BTC-USD/candles?granularity=${granularity}`, {
-    headers: { accept: 'application/json', 'user-agent': 'btc-ai-signal2/2.0' }
+    headers: { accept: 'application/json', 'user-agent': 'btc-ai-signal2/2.1' }
   });
   const text = await r.text();
   if (!r.ok) throw new Error(`Market API HTTP ${r.status}: ${text.slice(0, 160)}`);
@@ -29,6 +30,13 @@ async function getCandles(granularity) {
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
+    if (url.pathname === '/api/timeframes') {
+      try {
+        return json(await getFiveTimeframes());
+      } catch (e) {
+        return json({ ok: false, error: e?.message || 'Timeframe error' }, 502);
+      }
+    }
     if (url.pathname === '/api/trade-plan') {
       try {
         const [m1, m5, m15] = await Promise.all([
