@@ -2,7 +2,7 @@ const API='https://api.exchange.coinbase.com';
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','access-control-allow-origin':'*'}});
 
 async function get(path){
-  const r=await fetch(API+path,{headers:{accept:'application/json','user-agent':'btc-ai-signal2/1.1'}});
+  const r=await fetch(API+path,{headers:{accept:'application/json','user-agent':'btc-ai-signal2/1.2'}});
   const text=await r.text();
   if(!r.ok) throw new Error(`Market API HTTP ${r.status}: ${text.slice(0,160)}`);
   return JSON.parse(text);
@@ -10,70 +10,42 @@ async function get(path){
 
 function ema(values,period){
   if(values.length<period) return null;
-  const k=2/(period+1);
-  let e=values.slice(0,period).reduce((a,b)=>a+b,0)/period;
-  for(let i=period;i<values.length;i++) e=values[i]*k+e*(1-k);
-  return e;
+  const k=2/(period+1); let e=values.slice(0,period).reduce((a,b)=>a+b,0)/period;
+  for(let i=period;i<values.length;i++) e=values[i]*k+e*(1-k); return e;
 }
-
 function emaSeries(values,period){
-  const out=Array(values.length).fill(null);
-  if(values.length<period) return out;
-  const k=2/(period+1);
-  let e=values.slice(0,period).reduce((a,b)=>a+b,0)/period;
-  out[period-1]=e;
-  for(let i=period;i<values.length;i++){e=values[i]*k+e*(1-k);out[i]=e;}
+  const out=Array(values.length).fill(null); if(values.length<period)return out;
+  const k=2/(period+1); let e=values.slice(0,period).reduce((a,b)=>a+b,0)/period; out[period-1]=e;
+  for(let i=period;i<values.length;i++){e=values[i]*k+e*(1-k);out[i]=e} return out;
+}
+function rsiSeries(values,period=14){
+  const out=Array(values.length).fill(null); if(values.length<=period)return out;
+  let gain=0,loss=0;
+  for(let i=1;i<=period;i++){const d=values[i]-values[i-1];if(d>=0)gain+=d;else loss-=d}
+  let ag=gain/period,al=loss/period; out[period]=al===0?100:100-100/(1+ag/al);
+  for(let i=period+1;i<values.length;i++){const d=values[i]-values[i-1],g=Math.max(d,0),l=Math.max(-d,0);ag=(ag*(period-1)+g)/period;al=(al*(period-1)+l)/period;out[i]=al===0?100:100-100/(1+ag/al)}
   return out;
 }
-
-function rsi(values,period=14){
-  if(values.length<=period) return null;
-  let gain=0,loss=0;
-  for(let i=1;i<=period;i++){const d=values[i]-values[i-1];if(d>=0)gain+=d;else loss-=d;}
-  let ag=gain/period,al=loss/period;
-  for(let i=period+1;i<values.length;i++){
-    const d=values[i]-values[i-1],g=Math.max(d,0),l=Math.max(-d,0);
-    ag=(ag*(period-1)+g)/period;al=(al*(period-1)+l)/period;
-  }
-  return al===0?100:100-100/(1+ag/al);
-}
+function rsi(values,period=14){const s=rsiSeries(values,period);for(let i=s.length-1;i>=0;i--)if(Number.isFinite(s[i]))return s[i];return null}
 
 async function market(){
-  const [ticker,stats,raw]=await Promise.all([
-    get('/products/BTC-USD/ticker'),
-    get('/products/BTC-USD/stats'),
-    get('/products/BTC-USD/candles?granularity=60')
-  ]);
-  if(!Array.isArray(raw)||raw.length<200) throw new Error('Không đủ dữ liệu nến để tính EMA200');
-  const candles=raw.map(x=>({time:+x[0],low:+x[1],high:+x[2],open:+x[3],close:+x[4],volume:+x[5]}))
-    .filter(x=>Object.values(x).every(Number.isFinite)).sort((a,b)=>a.time-b.time);
-  if(candles.length<200) throw new Error('Không đủ nến hợp lệ để tính EMA200');
-  const closes=candles.map(x=>x.close);
-  const e20=ema(closes,20),e50=ema(closes,50),e200=ema(closes,200),r=rsi(closes);
-  const price=+ticker.price,open=+stats.open;
-  let score=50;
-  if(e20!=null&&e50!=null) score+=e20>e50?15:-15;
-  if(e50!=null&&e200!=null) score+=e50>e200?15:-15;
-  if(r!=null) score+=r>55?10:r<45?-10:0;
+  const [ticker,stats,raw]=await Promise.all([get('/products/BTC-USD/ticker'),get('/products/BTC-USD/stats'),get('/products/BTC-USD/candles?granularity=60')]);
+  if(!Array.isArray(raw)||raw.length<200)throw new Error('Không đủ dữ liệu nến để tính EMA200');
+  const candles=raw.map(x=>({time:+x[0],low:+x[1],high:+x[2],open:+x[3],close:+x[4],volume:+x[5]})).filter(x=>Object.values(x).every(Number.isFinite)).sort((a,b)=>a.time-b.time);
+  if(candles.length<200)throw new Error('Không đủ nến hợp lệ để tính EMA200');
+  const closes=candles.map(x=>x.close),e20=ema(closes,20),e50=ema(closes,50),e200=ema(closes,200),r=rsi(closes),price=+ticker.price,open=+stats.open;
+  let score=50;if(e20!=null&&e50!=null)score+=e20>e50?15:-15;if(e50!=null&&e200!=null)score+=e50>e200?15:-15;if(r!=null)score+=r>55?10:r<45?-10:0;
   score=Math.max(1,Math.min(99,Math.round(score)));
-  return {
-    ok:true,price,bid:+ticker.bid,ask:+ticker.ask,
-    change24h:Number.isFinite(open)&&open>0?(price-open)/open*100:null,
-    score,signal:score>=65?'LONG':score<=35?'SHORT':'NO TRADE',
-    indicators:{ema20:e20,ema50:e50,ema200:e200,rsi14:r},
-    candles:candles.slice(-220),
-    source:'Coinbase BTC-USD',updatedAt:new Date().toISOString()
-  };
+  return {ok:true,price,bid:+ticker.bid,ask:+ticker.ask,change24h:Number.isFinite(open)&&open>0?(price-open)/open*100:null,score,signal:score>=65?'LONG':score<=35?'SHORT':'NO TRADE',indicators:{ema20:e20,ema50:e50,ema200:e200,rsi14:r},candles:candles.slice(-220),source:'Coinbase BTC-USD',updatedAt:new Date().toISOString()};
 }
 
-function page(){return `<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BTC AI Signal 2</title><style>:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;padding:24px;background:#0b1020;color:#eef;font-family:Arial;max-width:1200px;margin:auto}h1{margin:0 0 4px;font-size:34px}small{color:#9aa8c4}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:20px 0 16px}.card{background:#151d33;border:1px solid #293653;border-radius:12px;padding:16px}.v{font-size:25px;font-weight:700;margin-top:8px}.chart{height:480px;position:relative;margin-top:14px}.chart canvas{width:100%;height:100%;display:block}.legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;color:#b9c6df;font-size:13px}.legend span{padding:6px 10px;border:1px solid #33415f;border-radius:999px}pre{white-space:pre-wrap;color:#cbd5e1}@media(max-width:650px){body{padding:14px}.chart{height:360px}}</style></head><body><h1>BTC AI Signal 2</h1><small>Dữ liệu BTC realtime • Paper trading • Không giao dịch tiền thật</small><div class="grid"><div class="card">Giá<div id="p" class="v">--</div></div><div class="card">24h<div id="ch" class="v">--</div></div><div class="card">Score<div id="sc" class="v">--</div></div><div class="card">Tín hiệu<div id="sg" class="v">--</div></div><div class="card">EMA20<div id="e20" class="v">--</div></div><div class="card">EMA50<div id="e50" class="v">--</div></div><div class="card">EMA200<div id="e200" class="v">--</div></div><div class="card">RSI14<div id="rsi" class="v">--</div></div></div><div class="card"><b>Biểu đồ BTC/USD — 120 nến 1 phút</b><div class="legend"><span>▮ Nến tăng</span><span>▮ Nến giảm</span><span>EMA20</span><span>EMA50</span><span>EMA200</span></div><div class="chart"><canvas id="cv"></canvas></div></div><div class="card" style="margin-top:16px"><b>Trạng thái</b><pre id="st">Đang đồng bộ...</pre></div><script>
+function page(){return `<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BTC AI Signal 2</title><style>:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;padding:24px;background:#0b1020;color:#eef;font-family:Arial;max-width:1200px;margin:auto}h1{margin:0 0 4px;font-size:34px}small{color:#9aa8c4}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:20px 0 16px}.card{background:#151d33;border:1px solid #293653;border-radius:12px;padding:16px}.v{font-size:25px;font-weight:700;margin-top:8px}.chart{height:480px;position:relative;margin-top:14px}.chart canvas{width:100%;height:100%;display:block}.rsiChart{height:180px;position:relative;margin-top:14px}.rsiChart canvas{width:100%;height:100%;display:block}.legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;color:#b9c6df;font-size:13px}.legend span{padding:6px 10px;border:1px solid #33415f;border-radius:999px}pre{white-space:pre-wrap;color:#cbd5e1}@media(max-width:650px){body{padding:14px}.chart{height:360px}.rsiChart{height:160px}}</style></head><body><h1>BTC AI Signal 2</h1><small>Dữ liệu BTC realtime • Paper trading • Không giao dịch tiền thật</small><div class="grid"><div class="card">Giá<div id="p" class="v">--</div></div><div class="card">24h<div id="ch" class="v">--</div></div><div class="card">Score<div id="sc" class="v">--</div></div><div class="card">Tín hiệu<div id="sg" class="v">--</div></div><div class="card">EMA20<div id="e20" class="v">--</div></div><div class="card">EMA50<div id="e50" class="v">--</div></div><div class="card">EMA200<div id="e200" class="v">--</div></div><div class="card">RSI14<div id="rsi" class="v">--</div></div></div><div class="card"><b>Biểu đồ BTC/USD — 120 nến 1 phút</b><div class="legend"><span>▮ Nến tăng</span><span>▮ Nến giảm</span><span>EMA20</span><span>EMA50</span><span>EMA200</span></div><div class="chart"><canvas id="cv"></canvas></div></div><div class="card" style="margin-top:16px"><b>RSI14 — 120 nến 1 phút</b><div class="legend"><span>RSI14</span><span>Quá mua 70</span><span>Trung tính 50</span><span>Quá bán 30</span></div><div class="rsiChart"><canvas id="rv"></canvas></div></div><div class="card" style="margin-top:16px"><b>Trạng thái</b><pre id="st">Đang đồng bộ...</pre></div><script>
 let last=null;const $=id=>document.getElementById(id);const f=(n,d=2)=>Number.isFinite(+n)?(+n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'--';
 function series(a,p){const o=Array(a.length).fill(null);if(a.length<p)return o;const k=2/(p+1);let e=a.slice(0,p).reduce((u,v)=>u+v,0)/p;o[p-1]=e;for(let i=p;i<a.length;i++){e=a[i]*k+e*(1-k);o[i]=e}return o}
-function draw(all){last=all;const cv=$('cv'),box=cv.getBoundingClientRect(),q=devicePixelRatio||1;cv.width=Math.max(1,Math.floor(box.width*q));cv.height=Math.max(1,Math.floor(box.height*q));const x=cv.getContext('2d');x.setTransform(q,0,0,q,0,0);const w=box.width,h=box.height;x.clearRect(0,0,w,h);if(!all||all.length<1)return;
-const start=Math.max(0,all.length-120),c=all.slice(start),closes=all.map(z=>z.close),s20=series(closes,20),s50=series(closes,50),s200=series(closes,200);const lo=Math.min(...c.map(z=>z.low)),hi=Math.max(...c.map(z=>z.high)),span=hi-lo||1,pad=span*.10;let min=lo-pad,max=hi+pad;const left=8,right=72,top=18,bottom=28,ww=Math.max(1,w-left-right),hh=Math.max(1,h-top-bottom),px=i=>left+i*ww/Math.max(1,c.length-1),py=v=>top+(max-v)*hh/(max-min);x.strokeStyle='rgba(120,140,180,.18)';x.lineWidth=1;for(let i=0;i<5;i++){const y=top+i*hh/4;x.beginPath();x.moveTo(left,y);x.lineTo(w-right,y);x.stroke()}x.fillStyle='#8d9ab5';x.font='12px Arial';for(let i=0;i<5;i++){const v=max-i*(max-min)/4;x.fillText(f(v),w-right+5,top+i*hh/4+4)}
-const cw=Math.max(3,ww/c.length*.70);c.forEach((z,i)=>{const xx=px(i),yo=py(z.open),yc=py(z.close),yh=py(z.high),yl=py(z.low),up=z.close>=z.open;x.strokeStyle=up?'#35d07f':'#ff6575';x.fillStyle=x.strokeStyle;x.lineWidth=1.1;x.beginPath();x.moveTo(xx,Math.max(top,yh));x.lineTo(xx,Math.min(h-bottom,yl));x.stroke();const y=Math.max(top,Math.min(h-bottom,Math.min(yo,yc))),bh=Math.max(2,Math.min(h-bottom-y,Math.abs(yc-yo)));x.fillRect(xx-cw/2,y,cw,bh)});
-function line(arr,offset,stroke,width){x.strokeStyle=stroke;x.lineWidth=width;x.beginPath();let started=false;for(let i=0;i<c.length;i++){const v=arr[offset+i];if(!Number.isFinite(v)){started=false;continue}const xx=px(i),yy=py(v);if(!started){x.moveTo(xx,yy);started=true}else x.lineTo(xx,yy)}x.stroke()}line(s20,start,'#61a5ff',1.5);line(s50,start,'#f2c94c',1.5);line(s200,start,'#c084fc',1.7)}
-async function tick(){try{const r=await fetch('/api/market?ts='+Date.now(),{cache:'no-store'}),d=await r.json();if(!r.ok||d.ok===false)throw Error(d.error||'API lỗi');$('p').textContent=f(d.price)+' USD';$('ch').textContent=Number.isFinite(+d.change24h)?f(d.change24h)+'%':'--';$('sc').textContent=d.score;$('sg').textContent=d.signal;$('e20').textContent=f(d.indicators.ema20);$('e50').textContent=f(d.indicators.ema50);$('e200').textContent=f(d.indicators.ema200);$('rsi').textContent=f(d.indicators.rsi14);$('st').textContent='Đã đồng bộ: '+new Date(d.updatedAt).toLocaleString('vi-VN')+' | Lịch sử: '+d.candles.length+' nến | Hiển thị: 120 nến | Nguồn: '+d.source;draw(d.candles)}catch(e){$('st').textContent='Lỗi API: '+e.message}}
-tick();setInterval(tick,10000);addEventListener('resize',()=>draw(last));</script></body></html>`}
+function rsiS(a,p=14){const o=Array(a.length).fill(null);if(a.length<=p)return o;let g=0,l=0;for(let i=1;i<=p;i++){const d=a[i]-a[i-1];if(d>=0)g+=d;else l-=d}let ag=g/p,al=l/p;o[p]=al===0?100:100-100/(1+ag/al);for(let i=p+1;i<a.length;i++){const d=a[i]-a[i-1],gg=Math.max(d,0),ll=Math.max(-d,0);ag=(ag*(p-1)+gg)/p;al=(al*(p-1)+ll)/p;o[i]=al===0?100:100-100/(1+ag/al)}return o}
+function draw(all){last=all;const cv=$('cv'),box=cv.getBoundingClientRect(),q=devicePixelRatio||1;cv.width=Math.max(1,Math.floor(box.width*q));cv.height=Math.max(1,Math.floor(box.height*q));const x=cv.getContext('2d');x.setTransform(q,0,0,q,0,0);const w=box.width,h=box.height;x.clearRect(0,0,w,h);if(!all||!all.length)return;const start=Math.max(0,all.length-120),c=all.slice(start),closes=all.map(z=>z.close),s20=series(closes,20),s50=series(closes,50),s200=series(closes,200),lo=Math.min(...c.map(z=>z.low)),hi=Math.max(...c.map(z=>z.high)),span=hi-lo||1,pad=span*.10,min=lo-pad,max=hi+pad,left=8,right=72,top=18,bottom=28,ww=Math.max(1,w-left-right),hh=Math.max(1,h-top-bottom),px=i=>left+i*ww/Math.max(1,c.length-1),py=v=>top+(max-v)*hh/(max-min);x.strokeStyle='rgba(120,140,180,.18)';x.lineWidth=1;for(let i=0;i<5;i++){const y=top+i*hh/4;x.beginPath();x.moveTo(left,y);x.lineTo(w-right,y);x.stroke()}x.fillStyle='#8d9ab5';x.font='12px Arial';for(let i=0;i<5;i++){const v=max-i*(max-min)/4;x.fillText(f(v),w-right+5,top+i*hh/4+4)}const cw=Math.max(3,ww/c.length*.70);c.forEach((z,i)=>{const xx=px(i),yo=py(z.open),yc=py(z.close),yh=py(z.high),yl=py(z.low),up=z.close>=z.open;x.strokeStyle=up?'#35d07f':'#ff6575';x.fillStyle=x.strokeStyle;x.lineWidth=1.1;x.beginPath();x.moveTo(xx,Math.max(top,yh));x.lineTo(xx,Math.min(h-bottom,yl));x.stroke();const y=Math.max(top,Math.min(h-bottom,Math.min(yo,yc))),bh=Math.max(2,Math.min(h-bottom-y,Math.abs(yc-yo)));x.fillRect(xx-cw/2,y,cw,bh)});function line(arr,offset,stroke,width){x.strokeStyle=stroke;x.lineWidth=width;x.beginPath();let started=false;for(let i=0;i<c.length;i++){const v=arr[offset+i];if(!Number.isFinite(v)){started=false;continue}const xx=px(i),yy=py(v);if(!started){x.moveTo(xx,yy);started=true}else x.lineTo(xx,yy)}x.stroke()}line(s20,start,'#61a5ff',1.5);line(s50,start,'#f2c94c',1.5);line(s200,start,'#c084fc',1.7)}
+function drawRSI(all){const cv=$('rv'),box=cv.getBoundingClientRect(),q=devicePixelRatio||1;cv.width=Math.max(1,Math.floor(box.width*q));cv.height=Math.max(1,Math.floor(box.height*q));const x=cv.getContext('2d');x.setTransform(q,0,0,q,0,0);const w=box.width,h=box.height;x.clearRect(0,0,w,h);if(!all||!all.length)return;const start=Math.max(0,all.length-120),c=all.slice(start),a=all.map(z=>z.close),s=rsiS(a,14),left=8,right=48,top=12,bottom=22,ww=Math.max(1,w-left-right),hh=Math.max(1,h-top-bottom),px=i=>left+i*ww/Math.max(1,c.length-1),py=v=>top+(100-v)*hh/100;x.font='12px Arial';[70,50,30].forEach(v=>{const y=py(v);x.strokeStyle='rgba(120,140,180,.25)';x.lineWidth=1;x.beginPath();x.moveTo(left,y);x.lineTo(w-right,y);x.stroke();x.fillStyle='#8d9ab5';x.fillText(String(v),w-right+7,y+4)});x.strokeStyle='#f2c94c';x.lineWidth=1.7;x.beginPath();let started=false;for(let i=0;i<c.length;i++){const v=s[start+i];if(!Number.isFinite(v)){started=false;continue}const xx=px(i),yy=py(v);if(!started){x.moveTo(xx,yy);started=true}else x.lineTo(xx,yy)}x.stroke()}
+async function tick(){try{const r=await fetch('/api/market?ts='+Date.now(),{cache:'no-store'}),d=await r.json();if(!r.ok||d.ok===false)throw Error(d.error||'API lỗi');$('p').textContent=f(d.price)+' USD';$('ch').textContent=Number.isFinite(+d.change24h)?f(d.change24h)+'%':'--';$('sc').textContent=d.score;$('sg').textContent=d.signal;$('e20').textContent=f(d.indicators.ema20);$('e50').textContent=f(d.indicators.ema50);$('e200').textContent=f(d.indicators.ema200);$('rsi').textContent=f(d.indicators.rsi14);$('st').textContent='Đã đồng bộ: '+new Date(d.updatedAt).toLocaleString('vi-VN')+' | Lịch sử: '+d.candles.length+' nến | Hiển thị: 120 nến | Nguồn: '+d.source;draw(d.candles);drawRSI(d.candles)}catch(e){$('st').textContent='Lỗi API: '+e.message}}
+tick();setInterval(tick,10000);addEventListener('resize',()=>{draw(last);drawRSI(last)});</script></body></html>`}
 
 export default{async fetch(req){const u=new URL(req.url);try{if(u.pathname==='/health')return json({ok:true,service:'btc-ai-signal2',time:new Date().toISOString()});if(u.pathname==='/api/market')return json(await market());if(u.pathname==='/')return new Response(page(),{headers:{'content-type':'text/html;charset=utf-8','cache-control':'no-store'}});return json({ok:false,error:'Not found'},404)}catch(e){return json({ok:false,error:e?.message||'Unknown error'},502)}}};
