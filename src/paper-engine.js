@@ -1,3 +1,5 @@
+import { DurableObject } from 'cloudflare:workers';
+
 const DEFAULT_CAPITAL = 1000000;
 const MAX_TRADES = 5000;
 
@@ -19,6 +21,10 @@ function snapshotPosition(p, price) {
 }
 
 export class PaperTrading extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+  }
+
   async getState() {
     const s = await this.ctx.storage.get('state');
     return s || {initialCapital:DEFAULT_CAPITAL, capital:DEFAULT_CAPITAL, realizedPnl:0, position:null, trades:[], updatedAt:new Date().toISOString()};
