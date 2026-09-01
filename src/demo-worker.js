@@ -1,9 +1,76 @@
 import baseWorker, { PaperTrading } from './trade-worker.js';
+import { getFiveTimeframes } from './timeframes.js';
+
+const MARKET_API = 'https://api.exchange.coinbase.com';
 
 function addDemoButtons(html) {
-  const controls = `<div id="demo-controls" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid #293756"><button id="demo-reset" style="cursor:pointer;border:1px solid #405276;background:#1a2744;color:#eef3ff;border-radius:8px;padding:10px 14px;font-weight:700">Reset DEMO 1M</button><button id="demo-long" style="cursor:pointer;border:1px solid #267a52;background:#123d2a;color:#55dc92;border-radius:8px;padding:10px 14px;font-weight:700">Mở LONG DEMO</button><button id="demo-short" style="cursor:pointer;border:1px solid #8a3b46;background:#421c24;color:#ff7181;border-radius:8px;padding:10px 14px;font-weight:700">Mở SHORT DEMO</button><button id="demo-close" style="cursor:pointer;border:1px solid #765d28;background:#3b3015;color:#f4ca58;border-radius:8px;padding:10px 14px;font-weight:700">Đóng lệnh</button><span id="demo-action" style="align-self:center;color:#94a3c5">Bấm nút để test Paper Trading</span></div>`;
+  const controls = `<div id="demo-controls" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid #293756"><button id="demo-reset" style="cursor:pointer;border:1px solid #405276;background:#1a2744;color:#eef3ff;border-radius:8px;padding:10px 14px;font-weight:700">Reset DEMO 1M</button><button id="demo-long" style="cursor:pointer;border:1px solid #267a52;background:#123d2a;color:#55dc92;border-radius:8px;padding:10px 14px;font-weight:700">Mở LONG DEMO</button><button id="demo-short" style="cursor:pointer;border:1px solid #8a3b46;background:#421c24;color:#ff7181;border-radius:8px;padding:10px 14px;font-weight:700">Mở SHORT DEMO</button><button id="demo-close" style="cursor:pointer;border:1px solid #765d28;background:#3b3015;color:#f4ca58;border-radius:8px;padding:10px 14px;font-weight:700">Đóng lệnh</button><span style="align-self:center;color:#55dc92;font-weight:700">AI AUTO DEMO: ON</span><span id="demo-action" style="align-self:center;color:#94a3c5">AI tự động chỉ mở Paper Trading khi 5 khung đủ mạnh</span></div>`;
   const script = `<script>(function(){const $=id=>document.getElementById(id);async function post(path,body){const r=await fetch(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});const d=await r.json();if(!r.ok||d.ok===false)throw Error(d.error||('HTTP '+r.status));return d}async function price(){const d=await fetch('/api/market?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json());if(!d.ok)throw Error(d.error||'Market lỗi');return Number(d.price)}async function act(label,fn){$('demo-action').textContent=label+'...';try{await fn();$('demo-action').textContent='✓ '+label+' thành công'}catch(e){$('demo-action').textContent='✕ '+e.message;console.error(e)}}$('demo-reset').onclick=()=>act('Reset DEMO',()=>post('/api/paper/reset',{capital:1000000}));$('demo-long').onclick=()=>act('Mở LONG',async()=>{const p=await price();return post('/api/paper/open',{side:'LONG',entry:p,stopLoss:p-100,takeProfit1:p+100,takeProfit2:p+200,leverage:3,riskPct:.5,confidence:80,timeframe:'M5/M15/M30/H1/H4',signal:'DEMO_LONG_BUTTON',entryReason:'Nút demo'});});$('demo-short').onclick=()=>act('Mở SHORT',async()=>{const p=await price();return post('/api/paper/open',{side:'SHORT',entry:p,stopLoss:p+100,takeProfit1:p-100,takeProfit2:p-200,leverage:3,riskPct:.5,confidence:80,timeframe:'M5/M15/M30/H1/H4',signal:'DEMO_SHORT_BUTTON',entryReason:'Nút demo'});});$('demo-close').onclick=()=>act('Đóng lệnh',async()=>{const p=await price();return post('/api/paper/close',{price:p,reason:'BUTTON'});});})();</script>`;
   return html.replace('<script>(async()=>{', controls + '<script>(async()=>{').replace('</body></html>', script + '</body></html>');
+}
+
+async function getTickerPrice() {
+  const r = await fetch(`${MARKET_API}/products/BTC-USD/ticker`, { headers: { accept: 'application/json', 'user-agent': 'btc-ai-signal2-auto-demo/1.0' } });
+  if (!r.ok) throw new Error(`Coinbase ticker HTTP ${r.status}`);
+  const d = await r.json();
+  const p = Number(d?.price);
+  if (!(p > 0)) throw new Error('Coinbase trả giá không hợp lệ');
+  return p;
+}
+
+function timeframeScore(t) {
+  let score = 50;
+  if (Number.isFinite(t.ema20) && Number.isFinite(t.ema50)) score += t.ema20 > t.ema50 ? 15 : -15;
+  if (Number.isFinite(t.ema50) && Number.isFinite(t.ema200)) score += t.ema50 > t.ema200 ? 15 : -15;
+  if (Number.isFinite(t.rsi14)) score += t.rsi14 >= 55 && t.rsi14 <= 68 ? 10 : t.rsi14 < 42 ? -10 : 0;
+  if (Number.isFinite(t.close) && Number.isFinite(t.ema20)) score += t.close > t.ema20 ? 5 : -5;
+  return Math.max(1, Math.min(99, Math.round(score)));
+}
+
+function buildAutoSignal(data, price) {
+  const weights = { M5: 0.10, M15: 0.15, M30: 0.20, H1: 0.25, H4: 0.30 };
+  const scores = Object.fromEntries(data.timeframes.map(t => [t.timeframe, timeframeScore(t)]));
+  const score = Math.round(Object.entries(weights).reduce((sum, [tf, w]) => sum + scores[tf] * w, 0));
+  const signal = score >= 70 ? 'LONG' : score <= 30 ? 'SHORT' : 'WAIT';
+  const confidence = Math.round(Math.abs(score - 50) * 2);
+  if (signal === 'WAIT') return { signal, score, confidence, scores };
+
+  const stopDistance = price * 0.003;
+  const side = signal;
+  const stopLoss = side === 'LONG' ? price - stopDistance : price + stopDistance;
+  const takeProfit1 = side === 'LONG' ? price + stopDistance * 1.2 : price - stopDistance * 1.2;
+  const takeProfit2 = side === 'LONG' ? price + stopDistance * 2 : price - stopDistance * 2;
+  return {
+    signal, score, confidence, scores,
+    order: { side, entry: price, stopLoss, takeProfit1, takeProfit2, leverage: 3, riskPct: 0.5,
+      confidence, timeframe: 'M5/M15/M30/H1/H4', signal: `AUTO_${signal}`,
+      entryReason: `5TF score ${score} | M5 ${scores.M5} M15 ${scores.M15} M30 ${scores.M30} H1 ${scores.H1} H4 ${scores.H4}` }
+  };
+}
+
+async function autoDemo(env) {
+  if (!env.PAPER_TRADING) return;
+  const paper = env.PAPER_TRADING.get(env.PAPER_TRADING.idFromName('btc-ai-signal2-paper'));
+  const statusRes = await paper.fetch('https://paper/status');
+  const status = await statusRes.json();
+  if (!status.ok || status.position) return;
+
+  const historyRes = await paper.fetch('https://paper/history?limit=1');
+  const history = await historyRes.json();
+  const last = history?.trades?.at(-1);
+  if (last?.closedAt && Date.now() - new Date(last.closedAt).getTime() < 5 * 60 * 1000) return;
+
+  const [tf, price] = await Promise.all([getFiveTimeframes(), getTickerPrice()]);
+  const plan = buildAutoSignal(tf, price);
+  if (plan.signal === 'WAIT' || !plan.order) return;
+
+  const openRes = await paper.fetch('https://paper/open', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(plan.order)
+  });
+  const opened = await openRes.json();
+  if (!opened.ok) throw new Error(opened.error || 'Không mở được AUTO DEMO');
 }
 
 export { PaperTrading };
@@ -19,6 +86,14 @@ export default {
     return baseWorker.fetch(req, env, ctx);
   },
   async scheduled(event, env, ctx) {
-    return baseWorker.scheduled(event, env, ctx);
+    // Keep the existing 5-second alarm-based position management alive.
+    await baseWorker.scheduled(event, env, ctx);
+    try {
+      // Step 6: every cron tick, analyze the five real timeframes and open
+      // a DEMO order only when the weighted signal is strong enough.
+      await autoDemo(env);
+    } catch (_e) {
+      // Auto DEMO failures must never affect the market API or paper engine.
+    }
   }
 };
