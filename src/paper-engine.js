@@ -2,8 +2,8 @@ import { DurableObject } from 'cloudflare:workers';
 
 const DEFAULT_CAPITAL = 1000000;
 const MAX_TRADES = 5000;
-const DEFAULT_LEVERAGE = 1;
-const MAX_LEVERAGE = 20;
+const MIN_LEVERAGE = 10;
+const DEFAULT_LEVERAGE = MIN_LEVERAGE;
 const DEFAULT_RISK_PCT = 0.5;
 const MIN_RISK_PCT = 0.1;
 const MAX_RISK_PCT = 2;
@@ -68,8 +68,6 @@ export class PaperTrading extends DurableObject {
     let p = snapshotPosition(s.position, price);
     s.lastPrice = price; s.lastTickAt = p.lastMarkedAt;
 
-    // Profit-protection: once TP1 is reached, protect the trade at breakeven.
-    // Once TP2 is reached, protect at least TP1 and let the remaining move seek TP3.
     const hitSL = p.side === 'LONG' ? price <= p.stopLoss : price >= p.stopLoss;
     const hitTP1 = p.tp1 != null && (p.side === 'LONG' ? price >= p.tp1 : price <= p.tp1);
     const hitTP2 = p.tp2 != null && (p.side === 'LONG' ? price >= p.tp2 : price <= p.tp2);
@@ -93,14 +91,14 @@ export class PaperTrading extends DurableObject {
     let protectedStop = p.stopLoss;
     let trailStage = p.trailStage || 'INITIAL';
     if (hitTP2) {
-      const candidate = p.side === 'LONG' ? p.tp1 : p.tp1;
+      const candidate = p.tp1;
       if (candidate != null) protectedStop = p.side === 'LONG' ? Math.max(protectedStop, candidate) : Math.min(protectedStop, candidate);
       trailStage = 'TP2_PROTECTED';
     } else if (hitTP1) {
       protectedStop = p.side === 'LONG' ? Math.max(protectedStop, p.entry) : Math.min(protectedStop, p.entry);
       trailStage = 'TP1_BREAKEVEN';
     }
-    if (protectedStop !== p.stopLoss || trailStage !== p.trailStage) p = { ...p, stopLoss: protectedStop, trailStage };
+    if (protectedStop !== p.stopLoss || trailStage !== p.trailStage) p = { ...p, stopLoss: protectedStop, trailStage, lastManagementAt: nowIso() };
 
     s.position = p; s.trades = s.trades.map(t => t.id === p.id ? { ...t, ...p } : t);
     return { state: s, closed: null };
@@ -110,7 +108,7 @@ export class PaperTrading extends DurableObject {
     const s = await this.getState();
     if (!s.position) return;
     try {
-      const r = await fetch(`${MARKET_API}/products/BTC-USD/ticker`, { headers: { accept: 'application/json', 'user-agent': 'btc-ai-signal2-paper/1.2' } });
+      const r = await fetch(`${MARKET_API}/products/BTC-USD/ticker`, { headers: { accept: 'application/json', 'user-agent': 'btc-ai-signal2-paper/1.3' } });
       if (!r.ok) throw new Error(`Coinbase HTTP ${r.status}`);
       const data = await r.json(); const price = num(data?.price);
       if (!(price > 0)) throw new Error('Coinbase trả giá không hợp lệ');
@@ -138,7 +136,9 @@ export class PaperTrading extends DurableObject {
       const b = await request.json().catch(() => ({}));
       const side = String(b.side || '').toUpperCase(); const entry = num(b.entry); const stopLoss = num(b.stopLoss); const tp1 = num(b.takeProfit1, null); const tp2 = num(b.takeProfit2, null); const tp3 = num(b.takeProfit3, null);
       const validation = validateTarget(side, entry, stopLoss, tp1, tp2, tp3); if (validation) return Response.json({ ok: false, error: validation }, { status: 400 });
-      const leverage = Math.max(1, Math.min(MAX_LEVERAGE, num(b.leverage, DEFAULT_LEVERAGE))); const riskPct = Math.max(MIN_RISK_PCT, Math.min(MAX_RISK_PCT, num(b.riskPct, DEFAULT_RISK_PCT))); const riskAmount = s.capital * riskPct / 100; const stopPct = Math.abs(entry - stopLoss) / entry; const notional = Math.min(s.capital * leverage, riskAmount / stopPct); const quantity = notional / entry; const now = nowIso(); const id = `DEMO-${Date.now()}`;
+      const requestedLeverage = num(b.leverage, DEFAULT_LEVERAGE);
+      const leverage = Math.max(MIN_LEVERAGE, requestedLeverage || DEFAULT_LEVERAGE);
+      const riskPct = Math.max(MIN_RISK_PCT, Math.min(MAX_RISK_PCT, num(b.riskPct, DEFAULT_RISK_PCT))); const riskAmount = s.capital * riskPct / 100; const stopPct = Math.abs(entry - stopLoss) / entry; const notional = Math.min(s.capital * leverage, riskAmount / stopPct); const quantity = notional / entry; const now = nowIso(); const id = `DEMO-${Date.now()}`;
       const riskDistance = Math.abs(entry - stopLoss);
       const rewardDistance = tp3 != null ? Math.abs(tp3 - entry) : tp2 != null ? Math.abs(tp2 - entry) : tp1 != null ? Math.abs(tp1 - entry) : 0;
       const rr = riskDistance > 0 ? rewardDistance / riskDistance : null;
@@ -147,7 +147,7 @@ export class PaperTrading extends DurableObject {
         mfePriceMove: 0, maePriceMove: 0, mfeR: 0, maeR: 0, confidence: num(b.confidence), timeframe: b.timeframe || 'M5/M15/M30/H1/H4',
         signal: b.signal || side, entryReason: b.entryReason || null, entryMode: b.entryMode || null,
         learningEligible: b.learningEligible === true, signalSnapshot: b.snapshot || null, snapshotAt: b.snapshot ? now : null,
-        rr, trailStage: 'INITIAL', tpPlan: b.tpPlan || 'ADAPTIVE_STRUCTURE'
+        rr, trailStage: 'INITIAL', lastManagementAt: now, tpPlan: b.tpPlan || 'ADAPTIVE_STRUCTURE'
       };
       s.engineError = null; s.trades = [...s.trades, s.position].slice(-MAX_TRADES); await this.saveState(s); await this.ctx.storage.setAlarm(Date.now() + MONITOR_MS);
       return Response.json({ ok: true, position: s.position, equity: s.capital, stats: closedStats(s) });
