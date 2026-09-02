@@ -1,8 +1,12 @@
 const API='https://api.exchange.coinbase.com';
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','access-control-allow-origin':'*'}});
+let marketCache=null;
+let marketCacheAt=0;
+let marketInFlight=null;
+const MARKET_CACHE_MS=2000;
 
 async function get(path){
-  const r=await fetch(API+path,{headers:{accept:'application/json','user-agent':'btc-ai-signal2/1.2'}});
+  const r=await fetch(API+path,{headers:{accept:'application/json','user-agent':'btc-ai-signal2/1.3'}});
   const text=await r.text();
   if(!r.ok) throw new Error(`Market API HTTP ${r.status}: ${text.slice(0,160)}`);
   return JSON.parse(text);
@@ -28,7 +32,7 @@ function rsiSeries(values,period=14){
 }
 function rsi(values,period=14){const s=rsiSeries(values,period);for(let i=s.length-1;i>=0;i--)if(Number.isFinite(s[i]))return s[i];return null}
 
-async function market(){
+async function buildMarket(){
   const [ticker,stats,raw]=await Promise.all([get('/products/BTC-USD/ticker'),get('/products/BTC-USD/stats'),get('/products/BTC-USD/candles?granularity=60')]);
   if(!Array.isArray(raw)||raw.length<200)throw new Error('Không đủ dữ liệu nến để tính EMA200');
   const candles=raw.map(x=>({time:+x[0],low:+x[1],high:+x[2],open:+x[3],close:+x[4],volume:+x[5]})).filter(x=>Object.values(x).every(Number.isFinite)).sort((a,b)=>a.time-b.time);
@@ -37,6 +41,14 @@ async function market(){
   let score=50;if(e20!=null&&e50!=null)score+=e20>e50?15:-15;if(e50!=null&&e200!=null)score+=e50>e200?15:-15;if(r!=null)score+=r>55?10:r<45?-10:0;
   score=Math.max(1,Math.min(99,Math.round(score)));
   return {ok:true,price,bid:+ticker.bid,ask:+ticker.ask,change24h:Number.isFinite(open)&&open>0?(price-open)/open*100:null,score,signal:score>=65?'LONG':score<=35?'SHORT':'NO TRADE',indicators:{ema20:e20,ema50:e50,ema200:e200,rsi14:r},candles:candles.slice(-220),source:'Coinbase BTC-USD',updatedAt:new Date().toISOString()};
+}
+
+async function market(){
+  const now=Date.now();
+  if(marketCache&&now-marketCacheAt<MARKET_CACHE_MS)return marketCache;
+  if(marketInFlight)return marketInFlight;
+  marketInFlight=buildMarket().then(data=>{marketCache=data;marketCacheAt=Date.now();return data;}).finally(()=>{marketInFlight=null;});
+  return marketInFlight;
 }
 
 function page(){return `<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BTC AI Signal 2</title><style>:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;padding:24px;background:#0b1020;color:#eef;font-family:Arial;max-width:1200px;margin:auto}h1{margin:0 0 4px;font-size:34px}small{color:#9aa8c4}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:20px 0 16px}.card{background:#151d33;border:1px solid #293653;border-radius:12px;padding:16px}.v{font-size:25px;font-weight:700;margin-top:8px}.chart{height:480px;position:relative;margin-top:14px}.chart canvas{width:100%;height:100%;display:block}.rsiChart{height:180px;position:relative;margin-top:14px}.rsiChart canvas{width:100%;height:100%;display:block}.legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;color:#b9c6df;font-size:13px}.legend span{padding:6px 10px;border:1px solid #33415f;border-radius:999px}pre{white-space:pre-wrap;color:#cbd5e1}@media(max-width:650px){body{padding:14px}.chart{height:360px}.rsiChart{height:160px}}</style></head><body><h1>BTC AI Signal 2</h1><small>Dữ liệu BTC realtime • Paper trading • Không giao dịch tiền thật</small><div class="grid"><div class="card">Giá<div id="p" class="v">--</div></div><div class="card">24h<div id="ch" class="v">--</div></div><div class="card">Score<div id="sc" class="v">--</div></div><div class="card">Tín hiệu<div id="sg" class="v">--</div></div><div class="card">EMA20<div id="e20" class="v">--</div></div><div class="card">EMA50<div id="e50" class="v">--</div></div><div class="card">EMA200<div id="e200" class="v">--</div></div><div class="card">RSI14<div id="rsi" class="v">--</div></div></div><div class="card"><b>Biểu đồ BTC/USD — 120 nến 1 phút</b><div class="legend"><span>▮ Nến tăng</span><span>▮ Nến giảm</span><span>EMA20</span><span>EMA50</span><span>EMA200</span></div><div class="chart"><canvas id="cv"></canvas></div></div><div class="card" style="margin-top:16px"><b>RSI14 — 120 nến 1 phút</b><div class="legend"><span>RSI14</span><span>Quá mua 70</span><span>Trung tính 50</span><span>Quá bán 30</span></div><div class="rsiChart"><canvas id="rv"></canvas></div></div><div class="card" style="margin-top:16px"><b>Trạng thái</b><pre id="st">Đang đồng bộ...</pre></div><script>
