@@ -7,13 +7,17 @@ const NATIVE = { M5: 300, M15: 900, H1: 3600 };
 const BATCH = 300;
 const CALC_CANDLES = 300;
 const CHART_CANDLES = 120;
+const CACHE_TTL_MS = 30000;
+let timeframeCache = null;
+let timeframeCacheAt = 0;
+let timeframeInFlight = null;
 
 async function fetchBatch(seconds, endSeconds) {
   const end = Math.floor(endSeconds / seconds) * seconds;
   const start = end - (BATCH - 1) * seconds;
   const url = `${API}/products/BTC-USD/candles?granularity=${seconds}&start=${new Date(start * 1000).toISOString()}&end=${new Date(end * 1000).toISOString()}`;
   const r = await fetch(url, {
-    headers: { accept: 'application/json', 'user-agent': 'btc-ai-signal2/timeframes-2.3' }
+    headers: { accept: 'application/json', 'user-agent': 'btc-ai-signal2/timeframes-2.4' }
   });
   const text = await r.text();
   if (!r.ok) throw new Error(`Coinbase HTTP ${r.status}: ${text.slice(0, 180)}`);
@@ -98,8 +102,7 @@ function analyze(candles) {
   };
 }
 
-export async function getFiveTimeframes() {
-  // Enough real source candles for a full EMA200 calculation after aggregation.
+async function buildFiveTimeframes() {
   const [m5, m15, h1] = await Promise.all([
     getMany(NATIVE.M5, 300),
     getMany(NATIVE.M15, 600),
@@ -126,4 +129,18 @@ export async function getFiveTimeframes() {
     timeframes: data,
     updatedAt: new Date().toISOString()
   };
+}
+
+export async function getFiveTimeframes() {
+  const now = Date.now();
+  if (timeframeCache && now - timeframeCacheAt < CACHE_TTL_MS) return timeframeCache;
+  if (timeframeInFlight) return timeframeInFlight;
+  timeframeInFlight = buildFiveTimeframes().then(data => {
+    timeframeCache = data;
+    timeframeCacheAt = Date.now();
+    return data;
+  }).finally(() => {
+    timeframeInFlight = null;
+  });
+  return timeframeInFlight;
 }
