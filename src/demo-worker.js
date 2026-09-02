@@ -4,13 +4,13 @@ import { getFiveTimeframes } from './timeframes.js';
 const MARKET_API = 'https://api.exchange.coinbase.com';
 
 function addDemoButtons(html) {
-  const controls = `<div id="demo-controls" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid #293756"><button id="demo-reset" style="cursor:pointer;border:1px solid #405276;background:#1a2744;color:#eef3ff;border-radius:8px;padding:10px 14px;font-weight:700">Reset DEMO 1M</button><button id="demo-long" style="cursor:pointer;border:1px solid #267a52;background:#123d2a;color:#55dc92;border-radius:8px;padding:10px 14px;font-weight:700">Mở LONG DEMO</button><button id="demo-short" style="cursor:pointer;border:1px solid #8a3b46;background:#421c24;color:#ff7181;border-radius:8px;padding:10px 14px;font-weight:700">Mở SHORT DEMO</button><button id="demo-close" style="cursor:pointer;border:1px solid #765d28;background:#3b3015;color:#f4ca58;border-radius:8px;padding:10px 14px;font-weight:700">Đóng lệnh</button><span style="align-self:center;color:#55dc92;font-weight:700">AI AUTO DEMO: ON</span><span id="demo-action" style="align-self:center;color:#94a3c5">AI tự động chỉ mở Paper Trading khi qua bộ lọc 5 khung</span></div>`;
-  const script = `<script>(function(){const $=id=>document.getElementById(id);async function post(path,body){const r=await fetch(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});const d=await r.json();if(!r.ok||d.ok===false)throw Error(d.error||('HTTP '+r.status));return d}async function price(){const d=await fetch('/api/market?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json());if(!d.ok)throw Error(d.error||'Market lỗi');return Number(d.price)}async function act(label,fn){$('demo-action').textContent=label+'...';try{await fn();$('demo-action').textContent='✓ '+label+' thành công'}catch(e){$('demo-action').textContent='✕ '+e.message;console.error(e)}}$('demo-reset').onclick=()=>act('Reset DEMO',()=>post('/api/paper/reset',{capital:1000000}));$('demo-long').onclick=()=>act('Mở LONG',async()=>{const p=await price();return post('/api/paper/open',{side:'LONG',entry:p,stopLoss:p-100,takeProfit1:p+100,takeProfit2:p+200,leverage:3,riskPct:.5,confidence:80,timeframe:'M5/M15/M30/H1/H4',signal:'DEMO_LONG_BUTTON',entryReason:'Nút demo',learningEligible:false});});$('demo-short').onclick=()=>act('Mở SHORT',async()=>{const p=await price();return post('/api/paper/open',{side:'SHORT',entry:p,stopLoss:p+100,takeProfit1:p-100,takeProfit2:p-200,leverage:3,riskPct:.5,confidence:80,timeframe:'M5/M15/M30/H1/H4',signal:'DEMO_SHORT_BUTTON',entryReason:'Nút demo',learningEligible:false});});$('demo-close').onclick=()=>act('Đóng lệnh',async()=>{const p=await price();return post('/api/paper/close',{price:p,reason:'BUTTON'});});async function auto(){try{const r=await fetch('/api/paper/auto?ts='+Date.now(),{method:'POST',cache:'no-store'});const d=await r.json();if(d.ok&&d.position){$('demo-action').textContent='✓ AI AUTO đã mở '+d.position.side+' DEMO @ '+Number(d.position.entry).toLocaleString('en-US',{maximumFractionDigits:2})+' | '+(d.entryMode||'timing gate');}else if(d.ok&&d.signal){$('demo-action').textContent='AI AUTO: '+d.signal+' | Score '+(d.score??'--')+' | '+(d.reason||'đang chờ');}}catch(e){$('demo-action').textContent='AI AUTO CHECK: '+e.message}}auto();setInterval(auto,15000);})();</script>`;
+  const controls = `<div id="demo-controls" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid #293756"><button id="demo-reset" style="cursor:pointer;border:1px solid #405276;background:#1a2744;color:#eef3ff;border-radius:8px;padding:10px 14px;font-weight:700">Reset DEMO 1M</button><button id="demo-long" style="cursor:pointer;border:1px solid #267a52;background:#123d2a;color:#55dc92;border-radius:8px;padding:10px 14px;font-weight:700">Mở LONG DEMO</button><button id="demo-short" style="cursor:pointer;border:1px solid #8a3b46;background:#421c24;color:#ff7181;border-radius:8px;padding:10px 14px;font-weight:700">Mở SHORT DEMO</button><button id="demo-close" style="cursor:pointer;border:1px solid #765d28;background:#3b3015;color:#f4ca58;border-radius:8px;padding:10px 14px;font-weight:700">Đóng lệnh</button><span style="align-self:center;color:#55dc92;font-weight:700">AI AUTO DEMO: ON</span><span id="demo-action" style="align-self:center;color:#94a3c5">AI phân tích xu hướng 24H trước khi chọn entry</span></div><div id="demo-forecast" style="margin-top:8px;padding:9px 12px;border-radius:8px;background:#0c1427;color:#aebbd6;font-size:13px">24H FORECAST: đang phân tích...</div>`;
+  const script = `<script>(function(){const $=id=>document.getElementById(id);async function post(path,body){const r=await fetch(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});const d=await r.json();if(!r.ok||d.ok===false)throw Error(d.error||('HTTP '+r.status));return d}async function price(){const d=await fetch('/api/market?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json());if(!d.ok)throw Error(d.error||'Market lỗi');return Number(d.price)}async function act(label,fn){$('demo-action').textContent=label+'...';try{await fn();$('demo-action').textContent='✓ '+label+' thành công'}catch(e){$('demo-action').textContent='✕ '+e.message;console.error(e)}}$('demo-reset').onclick=()=>act('Reset DEMO',()=>post('/api/paper/reset',{capital:1000000}));$('demo-long').onclick=()=>act('Mở LONG',async()=>{const p=await price();return post('/api/paper/open',{side:'LONG',entry:p,stopLoss:p-100,takeProfit1:p+100,takeProfit2:p+200,leverage:3,riskPct:.5,confidence:80,timeframe:'M5/M15/M30/H1/H4',signal:'DEMO_LONG_BUTTON',entryReason:'Nút demo',learningEligible:false});});$('demo-short').onclick=()=>act('Mở SHORT',async()=>{const p=await price();return post('/api/paper/open',{side:'SHORT',entry:p,stopLoss:p+100,takeProfit1:p-100,takeProfit2:p-200,leverage:3,riskPct:.5,confidence:80,timeframe:'M5/M15/M30/H1/H4',signal:'DEMO_SHORT_BUTTON',entryReason:'Nút demo',learningEligible:false});});$('demo-close').onclick=()=>act('Đóng lệnh',async()=>{const p=await price();return post('/api/paper/close',{price:p,reason:'BUTTON'});});async function auto(){try{const r=await fetch('/api/paper/auto?ts='+Date.now(),{method:'POST',cache:'no-store'});const d=await r.json();if(d.forecast24h&&$('demo-forecast')){$('demo-forecast').textContent='24H FORECAST: '+d.forecast24h.direction+' | Bias '+d.forecast24h.bias+' | Hỗ trợ '+Number(d.forecast24h.supportDeep).toLocaleString('en-US',{maximumFractionDigits:0})+'–'+Number(d.forecast24h.support).toLocaleString('en-US',{maximumFractionDigits:0})+' | Kháng cự '+Number(d.forecast24h.resistance).toLocaleString('en-US',{maximumFractionDigits:0})+'–'+Number(d.forecast24h.resistanceHigh).toLocaleString('en-US',{maximumFractionDigits:0})+' | '+d.forecast24h.entryPlan}if(d.ok&&d.position){$('demo-action').textContent='✓ AI AUTO đã mở '+d.position.side+' DEMO @ '+Number(d.position.entry).toLocaleString('en-US',{maximumFractionDigits:2})+' | '+(d.position.entryMode||'timing gate');}else if(d.ok&&d.signal){$('demo-action').textContent='AI AUTO: '+d.signal+' | Score '+(d.score??'--')+' | '+(d.entryMode||'WAIT')+' | '+(d.reason||'đang chờ');}}catch(e){$('demo-action').textContent='AI AUTO CHECK: '+e.message}}auto();setInterval(auto,15000);})();</script>`;
   return html.replace('<script>(async()=>{', controls + '<script>(async()=>{').replace('</body></html>', script + '</body></html>');
 }
 
 async function getTickerPrice() {
-  const r = await fetch(`${MARKET_API}/products/BTC-USD/ticker`, { headers: { accept: 'application/json', 'user-agent': 'btc-ai-signal2-auto-demo/1.2' } });
+  const r = await fetch(`${MARKET_API}/products/BTC-USD/ticker`, { headers: { accept: 'application/json', 'user-agent': 'btc-ai-signal2-auto-demo/1.3' } });
   if (!r.ok) throw new Error(`Coinbase ticker HTTP ${r.status}`);
   const d = await r.json();
   const p = Number(d?.price);
@@ -36,119 +36,169 @@ function previousClose(t) {
   return Number(candles.length >= 2 ? candles[candles.length - 2]?.close : NaN);
 }
 
-function buildAutoSignal(data, price) {
-  const required = ['M5', 'M15', 'M30', 'H1', 'H4'];
-  if (!data || !Array.isArray(data.timeframes)) return { signal: 'WAIT', score: 50, confidence: 0, scores: {}, reason: 'Thiếu dữ liệu 5 khung' };
-  const byTf = Object.fromEntries(data.timeframes.map(t => [t.timeframe, t]));
-  const missing = required.filter(tf => !byTf[tf]);
-  if (missing.length) return { signal: 'WAIT', score: 50, confidence: 0, scores: {}, reason: `Thiếu timeframe: ${missing.join(', ')}` };
-  if (!(Number.isFinite(price) && price > 0)) return { signal: 'WAIT', score: 50, confidence: 0, scores: {}, reason: 'Giá thị trường không hợp lệ' };
-
-  const weights = { M5: 0.10, M15: 0.15, M30: 0.20, H1: 0.25, H4: 0.30 };
-  const scores = Object.fromEntries(required.map(tf => [tf, timeframeScore(byTf[tf])]));
-  const score = Math.round(Object.entries(weights).reduce((sum, [tf, w]) => sum + scores[tf] * w, 0));
-  const confidence = Math.round(Math.abs(score - 50) * 2);
-  const bullish = required.filter(tf => scores[tf] >= 60).length;
-  const bearish = required.filter(tf => scores[tf] <= 40).length;
-  const highBull = scores.H1 >= 60 && scores.H4 >= 60;
-  const highBear = scores.H1 <= 40 && scores.H4 <= 40;
-
-  // Step 6.1: separate direction quality from entry timing.
-  // We allow an earlier pullback/reclaim entry when the higher timeframes agree,
-  // but never chase a move that is already too far from its short-term EMA.
-  const m5 = byTf.M5, m15 = byTf.M15;
-  const m5Prev = previousClose(m5), m15Prev = previousClose(m15);
-  const longPullback = highBull && bullish >= 3 && score >= 55 && score < 75 &&
-    nearEma(price, m5.ema20) && nearEma(price, m15.ema20) &&
-    Number.isFinite(m5.rsi14) && m5.rsi14 >= 45 && m5.rsi14 <= 63 &&
-    (m5Prev < m5.ema20 || m15Prev < m15.ema20) && price >= m5.ema20;
-
-  const shortPullback = highBear && bearish >= 3 && score <= 45 && score > 25 &&
-    nearEma(price, m5.ema20) && nearEma(price, m15.ema20) &&
-    Number.isFinite(m5.rsi14) && m5.rsi14 >= 37 && m5.rsi14 <= 55 &&
-    (m5Prev > m5.ema20 || m15Prev > m15.ema20) && price <= m5.ema20;
-
-  if (longPullback) {
-    const stopDistance = price * 0.0035;
-    const timingConfidence = Math.max(55, Math.min(78, Math.round(55 + (score - 55) * 1.5)));
-    return { signal: 'LONG', score, confidence: timingConfidence, scores, qualityGate: 'PASS', entryMode: 'EARLY_PULLBACK_RECLAIM', learningEligible: true,
-      order: { side: 'LONG', entry: price, stopLoss: price - stopDistance, takeProfit1: price + stopDistance * 1.2, takeProfit2: price + stopDistance * 2, leverage: 3, riskPct: 0.5, confidence: timingConfidence, timeframe: 'M5/M15/M30/H1/H4', signal: 'AUTO_LONG_PULLBACK', entryMode: 'EARLY_PULLBACK_RECLAIM', entryReason: `Entry sớm pullback/reclaim | score ${score} | bull ${bullish}/5 | H1/H4 đồng thuận | không đuổi giá`, learningEligible: true, snapshot: data.timeframes } };
-  }
-
-  if (shortPullback) {
-    const stopDistance = price * 0.0035;
-    const timingConfidence = Math.max(55, Math.min(78, Math.round(55 + (45 - score) * 1.5)));
-    return { signal: 'SHORT', score, confidence: timingConfidence, scores, qualityGate: 'PASS', entryMode: 'EARLY_PULLBACK_RECLAIM', learningEligible: true,
-      order: { side: 'SHORT', entry: price, stopLoss: price + stopDistance, takeProfit1: price - stopDistance * 1.2, takeProfit2: price - stopDistance * 2, leverage: 3, riskPct: 0.5, confidence: timingConfidence, timeframe: 'M5/M15/M30/H1/H4', signal: 'AUTO_SHORT_PULLBACK', entryMode: 'EARLY_PULLBACK_RECLAIM', entryReason: `Entry sớm pullback/reclaim | score ${score} | bear ${bearish}/5 | H1/H4 đồng thuận | không đuổi giá`, learningEligible: true, snapshot: data.timeframes } };
-  }
-
-  // Strong confirmation entry remains available, but still rejects overheated M5.
-  if (score >= 75 && bullish >= 4 && highBull && confidence >= 50) {
-    const rsi = Number(byTf.M5.rsi14);
-    if (Number.isFinite(rsi) && rsi > 72) return { signal: 'WAIT', score, confidence, scores, reason: 'LONG bị chặn: RSI M5 quá nóng / không đuổi giá' };
-    if (!nearEma(price, byTf.M5.ema20, 0.012)) return { signal: 'WAIT', score, confidence, scores, reason: 'LONG bị chặn: giá đã chạy quá xa EMA20 M5' };
-    const stopDistance = price * 0.003;
-    return { signal: 'LONG', score, confidence, scores, qualityGate: 'PASS', entryMode: 'CONFIRMED', learningEligible: true,
-      order: { side: 'LONG', entry: price, stopLoss: price - stopDistance, takeProfit1: price + stopDistance * 1.2, takeProfit2: price + stopDistance * 2, leverage: 3, riskPct: 0.5, confidence, timeframe: 'M5/M15/M30/H1/H4', signal: 'AUTO_LONG', entryMode: 'CONFIRMED', entryReason: `5TF quality PASS | score ${score} | bull ${bullish}/5 | H1/H4 đồng thuận`, learningEligible: true, snapshot: data.timeframes } };
-  }
-
-  if (score <= 25 && bearish >= 4 && highBear && confidence >= 50) {
-    const rsi = Number(byTf.M5.rsi14);
-    if (Number.isFinite(rsi) && rsi < 28) return { signal: 'WAIT', score, confidence, scores, reason: 'SHORT bị chặn: RSI M5 quá bán / không đuổi giá' };
-    if (!nearEma(price, byTf.M5.ema20, 0.012)) return { signal: 'WAIT', score, confidence, scores, reason: 'SHORT bị chặn: giá đã chạy quá xa EMA20 M5' };
-    const stopDistance = price * 0.003;
-    return { signal: 'SHORT', score, confidence, scores, qualityGate: 'PASS', entryMode: 'CONFIRMED', learningEligible: true,
-      order: { side: 'SHORT', entry: price, stopLoss: price + stopDistance, takeProfit1: price - stopDistance * 1.2, takeProfit2: price - stopDistance * 2, leverage: 3, riskPct: 0.5, confidence, timeframe: 'M5/M15/M30/H1/H4', signal: 'AUTO_SHORT', entryMode: 'CONFIRMED', entryReason: `5TF quality PASS | score ${score} | bear ${bearish}/5 | H1/H4 đồng thuận`, learningEligible: true, snapshot: data.timeframes } };
-  }
-
-  return { signal: 'WAIT', score, confidence, scores, reason: `Entry timing WAIT | score ${score} | bull ${bullish}/5 | bear ${bearish}/5 | chờ pullback/reclaim hoặc xác nhận, không đuổi giá` };
+function slopePct(t, lookback) {
+  const candles = Array.isArray(t?.calcCandles) ? t.calcCandles : [];
+  if (candles.length <= lookback) return 0;
+  const a = Number(candles[candles.length - 1]?.close);
+  const b = Number(candles[candles.length - 1 - lookback]?.close);
+  if (!(a > 0) || !(b > 0)) return 0;
+  return (a / b - 1) * 100;
 }
 
-async function autoDemo(env) {
-  if (!env.PAPER_TRADING) return { ok: false, reason: 'Thiếu binding PAPER_TRADING' };
-  const paper = env.PAPER_TRADING.get(env.PAPER_TRADING.idFromName('btc-ai-signal2-paper'));
-  const statusRes = await paper.fetch('https://paper/status');
-  const status = await statusRes.json();
-  if (!status.ok) return { ok: false, reason: 'Paper status lỗi' };
-  if (status.position) return { ok: true, reason: 'Đang có DEMO ORDER', position: status.position };
+function recentRange(t, lookback) {
+  const candles = Array.isArray(t?.calcCandles) ? t.calcCandles.slice(-lookback) : [];
+  if (!candles.length) return { low: null, high: null };
+  const lows = candles.map(c => Number(c.low)).filter(Number.isFinite);
+  const highs = candles.map(c => Number(c.high)).filter(Number.isFinite);
+  return { low: lows.length ? Math.min(...lows) : null, high: highs.length ? Math.max(...highs) : null };
+}
 
-  const historyRes = await paper.fetch('https://paper/history?limit=1');
-  const history = await historyRes.json();
-  const last = history?.trades?.at(-1);
-  if (last?.closedAt && Date.now() - new Date(last.closedAt).getTime() < 5 * 60 * 1000) return { ok: true, signal: 'COOLDOWN', score: null, reason: 'Nghỉ 5 phút sau lệnh đóng' };
+function forecast24h(data, price) {
+  const byTf = Object.fromEntries((data?.timeframes || []).map(t => [t.timeframe, t]));
+  const h1 = byTf.H1, h4 = byTf.H4, m30 = byTf.M30;
+  if (!h1 || !h4 || !(price > 0)) return { direction:'NEUTRAL_24H', bias:50, confidence:0, support:price, supportDeep:price, resistance:price, resistanceHigh:price, entryPlan:'CHỜ DỮ LIỆU' };
 
-  const [tf, price] = await Promise.all([getFiveTimeframes(), getTickerPrice()]);
-  const plan = buildAutoSignal(tf, price);
-  if (plan.signal === 'WAIT' || !plan.order) return { ok: true, signal: plan.signal, score: plan.score, confidence: plan.confidence, scores: plan.scores, reason: plan.reason };
+  let bull = 0, bear = 0;
+  const vote = (v, points = 1) => { if (v > 0) bull += points; else if (v < 0) bear += points; };
+  const trendVote = t => t?.trend === 'BULLISH' ? 1 : t?.trend === 'BEARISH' ? -1 : 0;
+  vote(trendVote(h4), 5); vote(trendVote(h1), 4); vote(trendVote(m30), 2);
+  vote(slopePct(h4, 3), 3); vote(slopePct(h1, 8), 3); vote(slopePct(m30, 8), 1.5);
+  if (Number.isFinite(h4.rsi14)) vote(h4.rsi14 - 50, 2);
+  if (Number.isFinite(h1.rsi14)) vote(h1.rsi14 - 50, 1.5);
 
-  const openRes = await paper.fetch('https://paper/open', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(plan.order)
-  });
-  const opened = await openRes.json();
-  if (!opened.ok) throw new Error(opened.error || 'Không mở được AUTO DEMO');
-  return { ok: true, signal: plan.signal, score: plan.score, confidence: plan.confidence, scores: plan.scores, qualityGate: plan.qualityGate, entryMode: plan.entryMode, learningEligible: plan.learningEligible, position: opened.position, reason: `Đã mở AUTO DEMO — ${plan.entryMode}` };
+  const total = bull + bear;
+  let bias = total ? Math.round(50 + (bull - bear) / total * 50) : 50;
+  bias = Math.max(1, Math.min(99, bias));
+  const direction = bias >= 62 ? 'BULLISH_24H' : bias <= 38 ? 'BEARISH_24H' : 'RANGE_24H';
+  const confidence = Math.abs(bias - 50) * 2;
+
+  const h1Range = recentRange(h1, 24);
+  const h4Range = recentRange(h4, 6);
+  const support = Math.max(0, Math.min(h1Range.low ?? price, h4Range.low ?? price));
+  const resistance = Math.max(h1Range.high ?? price, h4Range.high ?? price);
+  const span = Math.max(price * 0.003, (resistance - support) * 0.10);
+  const supportDeep = Math.max(0, support - span);
+  const resistanceHigh = resistance + span;
+
+  let entryPlan = 'RANGE: chờ breakout hoặc hồi về biên, không đuổi giá';
+  if (direction === 'BULLISH_24H') entryPlan = 'ƯU TIÊN LONG: hồi về hỗ trợ/EMA20 rồi reclaim';
+  if (direction === 'BEARISH_24H') entryPlan = 'ƯU TIÊN SHORT: hồi lên kháng cự/EMA20 rồi reject';
+  return { direction, bias, confidence, support, supportDeep, resistance, resistanceHigh, entryPlan,
+    h1SlopePct:Number(slopePct(h1,8).toFixed(2)), h4SlopePct:Number(slopePct(h4,3).toFixed(2)),
+    range24hLow:h1Range.low, range24hHigh:h1Range.high, generatedAt:new Date().toISOString() };
+}
+
+function buildAutoSignal(data, price) {
+  const required = ['M5', 'M15', 'M30', 'H1', 'H4'];
+  if (!data || !Array.isArray(data.timeframes)) return { signal:'WAIT', score:50, confidence:0, scores:{}, reason:'Thiếu dữ liệu 5 khung' };
+  const byTf = Object.fromEntries(data.timeframes.map(t => [t.timeframe, t]));
+  const missing = required.filter(tf => !byTf[tf]);
+  if (missing.length) return { signal:'WAIT', score:50, confidence:0, scores:{}, reason:`Thiếu timeframe: ${missing.join(', ')}` };
+  if (!(Number.isFinite(price) && price > 0)) return { signal:'WAIT', score:50, confidence:0, scores:{}, reason:'Giá thị trường không hợp lệ' };
+
+  const weights = { M5:0.10, M15:0.15, M30:0.20, H1:0.25, H4:0.30 };
+  const scores = Object.fromEntries(required.map(tf => [tf, timeframeScore(byTf[tf])]));
+  const score = Math.round(Object.entries(weights).reduce((sum,[tf,w]) => sum + scores[tf]*w,0));
+  const confidence = Math.round(Math.abs(score-50)*2);
+  const bullish = required.filter(tf=>scores[tf]>=60).length;
+  const bearish = required.filter(tf=>scores[tf]<=40).length;
+  const highBull = scores.H1>=60 && scores.H4>=60;
+  const highBear = scores.H1<=40 && scores.H4<=40;
+  const f24 = forecast24h(data, price);
+  const m5=byTf.M5, m15=byTf.M15;
+  const m5Prev=previousClose(m5), m15Prev=previousClose(m15);
+  const priceToSupport = f24.support > 0 ? Math.max(0,(price-f24.support)/price) : 1;
+  const priceToResistance = f24.resistance > 0 ? Math.max(0,(f24.resistance-price)/price) : 1;
+
+  // Proactive 24H map: forecast chooses the side; local structure chooses the actual entry.
+  // This avoids waiting for score 75/25 and also avoids chasing a move that already ran.
+  const bullStructure = (scores.H4>=60 && scores.H1>=50) || (f24.bias>=70 && scores.H4>=60);
+  const bearStructure = (scores.H4<=40 && scores.H1<=50) || (f24.bias<=30 && scores.H4<=40);
+
+  const longPullback = f24.direction==='BULLISH_24H' && bullStructure && bullish>=2 && score>=52 &&
+    (nearEma(price,m5.ema20,0.009) || nearEma(price,m15.ema20,0.009) || priceToSupport<=0.012) &&
+    Number.isFinite(m5.rsi14) && m5.rsi14>=42 && m5.rsi14<=68 &&
+    price <= m5.ema20*1.008 &&
+    (m5Prev < m5.ema20 || m15Prev < m15.ema20 || priceToSupport<=0.006);
+
+  const shortPullback = f24.direction==='BEARISH_24H' && bearStructure && bearish>=2 && score<=48 &&
+    (nearEma(price,m5.ema20,0.009) || nearEma(price,m15.ema20,0.009) || priceToResistance<=0.012) &&
+    Number.isFinite(m5.rsi14) && m5.rsi14>=32 && m5.rsi14<=58 &&
+    price >= m5.ema20*0.992 &&
+    (m5Prev > m5.ema20 || m15Prev > m15.ema20 || priceToResistance<=0.006);
+
+  if(longPullback){
+    const stopDistance=Math.max(price*0.0035, Math.min(price*0.006, Math.abs(price-f24.support)*0.65 || price*0.0035));
+    const timingConfidence=Math.max(58,Math.min(84,Math.round(58+(score-52)*1.4+(f24.bias-62)*0.25)));
+    const snapshot={timeframes:data.timeframes,forecast24h:f24};
+    return{signal:'LONG',score,confidence:timingConfidence,scores,qualityGate:'PASS',entryMode:'24H_BIAS_PULLBACK',forecast24h:f24,learningEligible:true,
+      order:{side:'LONG',entry:price,stopLoss:price-stopDistance,takeProfit1:price+stopDistance*1.2,takeProfit2:price+stopDistance*2,leverage:3,riskPct:.5,confidence:timingConfidence,timeframe:'M5/M15/M30/H1/H4',signal:'AUTO_LONG_24H_PULLBACK',entryMode:'24H_BIAS_PULLBACK',entryReason:`24H ${f24.direction} | bias ${f24.bias} | pullback/reclaim | hỗ trợ ${Math.round(f24.support)}`,learningEligible:true,snapshot}};
+  }
+
+  if(shortPullback){
+    const stopDistance=Math.max(price*0.0035, Math.min(price*0.006, Math.abs(f24.resistance-price)*0.65 || price*0.0035));
+    const timingConfidence=Math.max(58,Math.min(84,Math.round(58+(48-score)*1.4+(38-f24.bias)*0.25)));
+    const snapshot={timeframes:data.timeframes,forecast24h:f24};
+    return{signal:'SHORT',score,confidence:timingConfidence,scores,qualityGate:'PASS',entryMode:'24H_BIAS_PULLBACK',forecast24h:f24,learningEligible:true,
+      order:{side:'SHORT',entry:price,stopLoss:price+stopDistance,takeProfit1:price-stopDistance*1.2,takeProfit2:price-stopDistance*2,leverage:3,riskPct:.5,confidence:timingConfidence,timeframe:'M5/M15/M30/H1/H4',signal:'AUTO_SHORT_24H_PULLBACK',entryMode:'24H_BIAS_PULLBACK',entryReason:`24H ${f24.direction} | bias ${f24.bias} | pullback/reclaim | kháng cự ${Math.round(f24.resistance)}`,learningEligible:true,snapshot}};
+  }
+
+  if(score>=75&&bullish>=4&&highBull&&confidence>=50){
+    const rsi=Number(byTf.M5.rsi14);
+    if(Number.isFinite(rsi)&&rsi>72)return{signal:'WAIT',score,confidence,scores,forecast24h:f24,reason:'LONG bị chặn: RSI M5 quá nóng / không đuổi giá'};
+    if(!nearEma(price,byTf.M5.ema20,0.012))return{signal:'WAIT',score,confidence,scores,forecast24h:f24,reason:'LONG bị chặn: giá đã chạy quá xa EMA20 M5'};
+    const stopDistance=price*.003;
+    const snapshot={timeframes:data.timeframes,forecast24h:f24};
+    return{signal:'LONG',score,confidence,scores,qualityGate:'PASS',entryMode:'CONFIRMED',forecast24h:f24,learningEligible:true,
+      order:{side:'LONG',entry:price,stopLoss:price-stopDistance,takeProfit1:price+stopDistance*1.2,takeProfit2:price+stopDistance*2,leverage:3,riskPct:.5,confidence,timeframe:'M5/M15/M30/H1/H4',signal:'AUTO_LONG',entryMode:'CONFIRMED',entryReason:`5TF quality PASS | score ${score} | bull ${bullish}/5 | H1/H4 đồng thuận`,learningEligible:true,snapshot}};
+  }
+
+  if(score<=25&&bearish>=4&&highBear&&confidence>=50){
+    const rsi=Number(byTf.M5.rsi14);
+    if(Number.isFinite(rsi)&&rsi<28)return{signal:'WAIT',score,confidence,scores,forecast24h:f24,reason:'SHORT bị chặn: RSI M5 quá bán / không đuổi giá'};
+    if(!nearEma(price,byTf.M5.ema20,0.012))return{signal:'WAIT',score,confidence,scores,forecast24h:f24,reason:'SHORT bị chặn: giá đã chạy quá xa EMA20 M5'};
+    const stopDistance=price*.003;
+    const snapshot={timeframes:data.timeframes,forecast24h:f24};
+    return{signal:'SHORT',score,confidence,scores,qualityGate:'PASS',entryMode:'CONFIRMED',forecast24h:f24,learningEligible:true,
+      order:{side:'SHORT',entry:price,stopLoss:price+stopDistance,takeProfit1:price-stopDistance*1.2,takeProfit2:price-stopDistance*2,leverage:3,riskPct:.5,confidence,timeframe:'M5/M15/M30/H1/H4',signal:'AUTO_SHORT',entryMode:'CONFIRMED',entryReason:`5TF quality PASS | score ${score} | bear ${bearish}/5 | H1/H4 đồng thuận`,learningEligible:true,snapshot}};
+  }
+
+  return{signal:'WAIT',score,confidence,scores,forecast24h:f24,reason:`24H ${f24.direction} | bias ${f24.bias} | Entry timing WAIT | chờ vùng entry đẹp, không đuổi giá`};
+}
+
+async function autoDemo(env){
+  if(!env.PAPER_TRADING)return{ok:false,reason:'Thiếu binding PAPER_TRADING'};
+  const paper=env.PAPER_TRADING.get(env.PAPER_TRADING.idFromName('btc-ai-signal2-paper'));
+  const statusRes=await paper.fetch('https://paper/status'); const status=await statusRes.json();
+  if(!status.ok)return{ok:false,reason:'Paper status lỗi'};
+  if(status.position)return{ok:true,reason:'Đang có DEMO ORDER',position:status.position};
+  const historyRes=await paper.fetch('https://paper/history?limit=1'); const history=await historyRes.json(); const last=history?.trades?.at(-1);
+  if(last?.closedAt&&Date.now()-new Date(last.closedAt).getTime()<5*60*1000)return{ok:true,signal:'COOLDOWN',score:null,reason:'Nghỉ 5 phút sau lệnh đóng'};
+  const [tf,price]=await Promise.all([getFiveTimeframes(),getTickerPrice()]);
+  const plan=buildAutoSignal(tf,price);
+  if(plan.signal==='WAIT'||!plan.order)return{ok:true,signal:plan.signal,score:plan.score,confidence:plan.confidence,scores:plan.scores,forecast24h:plan.forecast24h,reason:plan.reason};
+  const openRes=await paper.fetch('https://paper/open',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(plan.order)});
+  const opened=await openRes.json(); if(!opened.ok)throw new Error(opened.error||'Không mở được AUTO DEMO');
+  return{ok:true,signal:plan.signal,score:plan.score,confidence:plan.confidence,scores:plan.scores,qualityGate:plan.qualityGate,entryMode:plan.entryMode,learningEligible:plan.learningEligible,forecast24h:plan.forecast24h,position:opened.position,reason:`Đã mở AUTO DEMO — ${plan.entryMode}`};
 }
 
 export { PaperTrading };
 
 export default {
-  async fetch(req, env, ctx) {
-    const url = new URL(req.url);
-    if (url.pathname === '/') {
-      const r = await baseWorker.fetch(req, env, ctx);
-      const html = await r.text();
-      return new Response(addDemoButtons(html), { status: r.status, headers: r.headers });
+  async fetch(req,env,ctx){
+    const url=new URL(req.url);
+    if(url.pathname==='/'){
+      const r=await baseWorker.fetch(req,env,ctx); const html=await r.text();
+      return new Response(addDemoButtons(html),{status:r.status,headers:r.headers});
     }
-    if (url.pathname === '/api/paper/auto' && req.method === 'POST') {
-      try { return Response.json(await autoDemo(env)); }
-      catch (e) { return Response.json({ ok: false, error: e?.message || 'AUTO DEMO error' }, { status: 502 }); }
+    if(url.pathname==='/api/paper/auto'&&req.method==='POST'){
+      try{return Response.json(await autoDemo(env));}
+      catch(e){return Response.json({ok:false,error:e?.message||'AUTO DEMO error'},{status:502});}
     }
-    return baseWorker.fetch(req, env, ctx);
+    return baseWorker.fetch(req,env,ctx);
   },
-  async scheduled(event, env, ctx) {
-    await baseWorker.scheduled(event, env, ctx);
-    try { await autoDemo(env); } catch (_e) {}
+  async scheduled(event,env,ctx){
+    await baseWorker.scheduled(event,env,ctx);
+    try{await autoDemo(env);}catch(_e){}
   }
 };
