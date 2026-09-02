@@ -17,13 +17,15 @@ function num(v, fallback = null) {
 function sideSign(side) { return side === 'LONG' ? 1 : -1; }
 function nowIso() { return new Date().toISOString(); }
 
-function validateTarget(side, entry, stopLoss, tp1, tp2) {
+function validateTarget(side, entry, stopLoss, tp1, tp2, tp3) {
   if (!['LONG', 'SHORT'].includes(side)) return 'Side phải là LONG hoặc SHORT';
   if (!(entry > 0) || !(stopLoss > 0)) return 'Entry và Stop Loss phải > 0';
   if ((side === 'LONG' && stopLoss >= entry) || (side === 'SHORT' && stopLoss <= entry)) return 'Stop Loss không hợp lệ cho hướng lệnh';
   if (tp1 != null && (!(tp1 > 0) || (side === 'LONG' ? tp1 <= entry : tp1 >= entry))) return 'TP1 không hợp lệ cho hướng lệnh';
   if (tp2 != null && (!(tp2 > 0) || (side === 'LONG' ? tp2 <= entry : tp2 >= entry))) return 'TP2 không hợp lệ cho hướng lệnh';
+  if (tp3 != null && (!(tp3 > 0) || (side === 'LONG' ? tp3 <= entry : tp3 >= entry))) return 'TP3 không hợp lệ cho hướng lệnh';
   if (tp1 != null && tp2 != null && (side === 'LONG' ? tp2 < tp1 : tp2 > tp1)) return 'TP2 phải nằm xa Entry hơn TP1';
+  if (tp2 != null && tp3 != null && (side === 'LONG' ? tp3 < tp2 : tp3 > tp2)) return 'TP3 phải nằm xa Entry hơn TP2';
   return null;
 }
 
@@ -63,24 +65,52 @@ export class PaperTrading extends DurableObject {
 
   async markAndMaybeClose(s, price, source = 'HTTP') {
     if (!s.position) { s.lastPrice = price; s.lastTickAt = nowIso(); return { state: s, closed: null }; }
-    const p = snapshotPosition(s.position, price);
+    let p = snapshotPosition(s.position, price);
     s.lastPrice = price; s.lastTickAt = p.lastMarkedAt;
+
+    // Profit-protection: once TP1 is reached, protect the trade at breakeven.
+    // Once TP2 is reached, protect at least TP1 and let the remaining move seek TP3.
     const hitSL = p.side === 'LONG' ? price <= p.stopLoss : price >= p.stopLoss;
     const hitTP1 = p.tp1 != null && (p.side === 'LONG' ? price >= p.tp1 : price <= p.tp1);
     const hitTP2 = p.tp2 != null && (p.side === 'LONG' ? price >= p.tp2 : price <= p.tp2);
-    if (!(hitSL || hitTP2 || hitTP1)) { s.position = p; s.trades = s.trades.map(t => t.id === p.id ? { ...t, ...p } : t); return { state: s, closed: null }; }
-    const exitReason = hitSL ? (hitTP1 || hitTP2 ? 'SL_AND_TP_SAME_TICK' : 'SL') : hitTP2 ? 'TP2' : 'TP1';
-    const closed = { ...p, status: 'CLOSED', exit: price, exitReason, closeSource: source, closedAt: nowIso(), realizedPnl: p.unrealizedPnl, realizedR: p.unrealizedR, durationSec: Math.floor((Date.now() - new Date(p.openedAt).getTime()) / 1000) };
-    s.capital += closed.realizedPnl; s.realizedPnl += closed.realizedPnl; s.position = null; s.trades = s.trades.map(t => t.id === closed.id ? closed : t);
-    await this.ctx.storage.deleteAlarm();
-    return { state: s, closed };
+    const hitTP3 = p.tp3 != null && (p.side === 'LONG' ? price >= p.tp3 : price <= p.tp3);
+
+    if (hitSL) {
+      const closed = { ...p, status: 'CLOSED', exit: price, exitReason: 'SL', closeSource: source, closedAt: nowIso(), realizedPnl: p.unrealizedPnl, realizedR: p.unrealizedR, durationSec: Math.floor((Date.now() - new Date(p.openedAt).getTime()) / 1000) };
+      s.capital += closed.realizedPnl; s.realizedPnl += closed.realizedPnl; s.position = null; s.trades = s.trades.map(t => t.id === closed.id ? closed : t);
+      await this.ctx.storage.deleteAlarm();
+      return { state: s, closed };
+    }
+
+    if (hitTP3 || (!p.tp3 && hitTP2)) {
+      const exitReason = hitTP3 ? 'TP3' : 'TP2';
+      const closed = { ...p, status: 'CLOSED', exit: price, exitReason, closeSource: source, closedAt: nowIso(), realizedPnl: p.unrealizedPnl, realizedR: p.unrealizedR, durationSec: Math.floor((Date.now() - new Date(p.openedAt).getTime()) / 1000) };
+      s.capital += closed.realizedPnl; s.realizedPnl += closed.realizedPnl; s.position = null; s.trades = s.trades.map(t => t.id === closed.id ? closed : t);
+      await this.ctx.storage.deleteAlarm();
+      return { state: s, closed };
+    }
+
+    let protectedStop = p.stopLoss;
+    let trailStage = p.trailStage || 'INITIAL';
+    if (hitTP2) {
+      const candidate = p.side === 'LONG' ? p.tp1 : p.tp1;
+      if (candidate != null) protectedStop = p.side === 'LONG' ? Math.max(protectedStop, candidate) : Math.min(protectedStop, candidate);
+      trailStage = 'TP2_PROTECTED';
+    } else if (hitTP1) {
+      protectedStop = p.side === 'LONG' ? Math.max(protectedStop, p.entry) : Math.min(protectedStop, p.entry);
+      trailStage = 'TP1_BREAKEVEN';
+    }
+    if (protectedStop !== p.stopLoss || trailStage !== p.trailStage) p = { ...p, stopLoss: protectedStop, trailStage };
+
+    s.position = p; s.trades = s.trades.map(t => t.id === p.id ? { ...t, ...p } : t);
+    return { state: s, closed: null };
   }
 
   async alarm() {
     const s = await this.getState();
     if (!s.position) return;
     try {
-      const r = await fetch(`${MARKET_API}/products/BTC-USD/ticker`, { headers: { accept: 'application/json', 'user-agent': 'btc-ai-signal2-paper/1.1' } });
+      const r = await fetch(`${MARKET_API}/products/BTC-USD/ticker`, { headers: { accept: 'application/json', 'user-agent': 'btc-ai-signal2-paper/1.2' } });
       if (!r.ok) throw new Error(`Coinbase HTTP ${r.status}`);
       const data = await r.json(); const price = num(data?.price);
       if (!(price > 0)) throw new Error('Coinbase trả giá không hợp lệ');
@@ -106,16 +136,18 @@ export class PaperTrading extends DurableObject {
     if (url.pathname === '/open' && method === 'POST') {
       if (s.position) return Response.json({ ok: false, error: 'Đang có DEMO ORDER mở' }, { status: 409 });
       const b = await request.json().catch(() => ({}));
-      const side = String(b.side || '').toUpperCase(); const entry = num(b.entry); const stopLoss = num(b.stopLoss); const tp1 = num(b.takeProfit1, null); const tp2 = num(b.takeProfit2, null);
-      const validation = validateTarget(side, entry, stopLoss, tp1, tp2); if (validation) return Response.json({ ok: false, error: validation }, { status: 400 });
+      const side = String(b.side || '').toUpperCase(); const entry = num(b.entry); const stopLoss = num(b.stopLoss); const tp1 = num(b.takeProfit1, null); const tp2 = num(b.takeProfit2, null); const tp3 = num(b.takeProfit3, null);
+      const validation = validateTarget(side, entry, stopLoss, tp1, tp2, tp3); if (validation) return Response.json({ ok: false, error: validation }, { status: 400 });
       const leverage = Math.max(1, Math.min(MAX_LEVERAGE, num(b.leverage, DEFAULT_LEVERAGE))); const riskPct = Math.max(MIN_RISK_PCT, Math.min(MAX_RISK_PCT, num(b.riskPct, DEFAULT_RISK_PCT))); const riskAmount = s.capital * riskPct / 100; const stopPct = Math.abs(entry - stopLoss) / entry; const notional = Math.min(s.capital * leverage, riskAmount / stopPct); const quantity = notional / entry; const now = nowIso(); const id = `DEMO-${Date.now()}`;
+      const riskDistance = Math.abs(entry - stopLoss);
+      const rewardDistance = tp3 != null ? Math.abs(tp3 - entry) : tp2 != null ? Math.abs(tp2 - entry) : tp1 != null ? Math.abs(tp1 - entry) : 0;
+      const rr = riskDistance > 0 ? rewardDistance / riskDistance : null;
       s.position = {
-        id, status: 'OPEN', side, entry, stopLoss, tp1, tp2, quantity, notional, leverage, margin: notional / leverage, riskPct, riskAmount, openedAt: now,
+        id, status: 'OPEN', side, entry, stopLoss, tp1, tp2, tp3, quantity, notional, leverage, margin: notional / leverage, riskPct, riskAmount, openedAt: now,
         mfePriceMove: 0, maePriceMove: 0, mfeR: 0, maeR: 0, confidence: num(b.confidence), timeframe: b.timeframe || 'M5/M15/M30/H1/H4',
         signal: b.signal || side, entryReason: b.entryReason || null, entryMode: b.entryMode || null,
-        learningEligible: b.learningEligible === true,
-        signalSnapshot: b.snapshot || null,
-        snapshotAt: b.snapshot ? now : null
+        learningEligible: b.learningEligible === true, signalSnapshot: b.snapshot || null, snapshotAt: b.snapshot ? now : null,
+        rr, trailStage: 'INITIAL', tpPlan: b.tpPlan || 'ADAPTIVE_STRUCTURE'
       };
       s.engineError = null; s.trades = [...s.trades, s.position].slice(-MAX_TRADES); await this.saveState(s); await this.ctx.storage.setAlarm(Date.now() + MONITOR_MS);
       return Response.json({ ok: true, position: s.position, equity: s.capital, stats: closedStats(s) });
