@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "check": "node --check src/worker.js && node --check src/paper-engine.js && node --check src/trade-worker.js"
+    "check": "node --check src/worker.js && node --check src/paper-engine.js && node --check src/trade-worker.js && node --check src/demo-worker.js"
   },
   "devDependencies": {
     "wrangler": "latest"
