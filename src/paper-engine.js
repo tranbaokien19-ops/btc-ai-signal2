@@ -274,6 +274,10 @@ export class PaperTrading extends DurableObject {
     }
     if (url.pathname === '/daily-reports' && method === 'GET') {
       const limit = Math.max(1, Math.min(MAX_DAILY_REPORTS, Math.floor(num(url.searchParams.get('limit'), 14))));
+      // Backfill report snapshots from existing learning rows, then keep today's
+      // snapshot fresh. This preserves history across deploys/restarts.
+      const dates = new Set((s.learning || []).map(r => vnDate(r.evaluatedAt)).filter(Boolean));
+      for (const date of dates) upsertDailyReport(s, date);
       const today = vnDate(new Date().toISOString());
       const report = upsertDailyReport(s, today);
       await this.saveState(s);
