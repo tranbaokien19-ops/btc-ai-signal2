@@ -161,8 +161,10 @@ const DAILY_PANEL = `
     }catch(e){
       const status=document.getElementById("daily-report-status");
       status.textContent="✕ DAILY REPORT ERROR"; status.style.color="#ff7181";
-      document.getElementById("daily-report-summary").textContent=
-        e.name==="AbortError" ? "Lỗi: máy chủ báo cáo phản hồi quá lâu (>12 giây)." : "Lỗi: "+e.message;
+      const msg=e.name==="AbortError" ? "Lỗi: máy chủ báo cáo phản hồi quá lâu (>12 giây)." : "Lỗi: "+(e.message||"Không đọc được báo cáo");
+      document.getElementById("daily-report-summary").textContent=msg;
+      document.getElementById("daily-report-lessons").textContent="Bài học AI: chưa thể tổng hợp do lỗi tải báo cáo.";
+      document.getElementById("daily-report-history").textContent="Lịch sử báo cáo: chưa tải được.";
     }
   }
   check();
@@ -177,6 +179,35 @@ function vnDate(iso) {
   const d = new Date(iso);
   if (!Number.isFinite(d.getTime())) return null;
   return new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Ho_Chi_Minh', year:'numeric', month:'2-digit', day:'2-digit' }).format(d);
+}
+
+function dailyReportForDate(s, dateVN) {
+  const rows = (Array.isArray(s?.learning) ? s.learning : [])
+    .filter(r => r && r.evaluatedAt && vnDate(r.evaluatedAt) === dateVN && Number.isFinite(Number(r.realizedPnl)));
+  const wins = rows.filter(r => Number(r.realizedPnl) > 0);
+  const losses = rows.filter(r => Number(r.realizedPnl) < 0);
+  const pnl = rows.reduce((a, r) => a + Number(r.realizedPnl || 0), 0);
+  const avgR = rows.length ? rows.reduce((a, r) => a + (Number(r.realizedR) || 0), 0) / rows.length : 0;
+  const forecastCorrect = rows.filter(r => r.forecastDirectionCorrect === true).length;
+  const scenarioMatched = rows.filter(r => r.scenarioMatched === true).length;
+  const learningScore = rows.length ? rows.reduce((a, r) => a + (Number(r.learningScore) || 0), 0) / rows.length : 0;
+  const grossProfit = wins.reduce((a, r) => a + Number(r.realizedPnl || 0), 0);
+  const grossLoss = Math.abs(losses.reduce((a, r) => a + Number(r.realizedPnl || 0), 0));
+  return {
+    dateVN,
+    trades: rows.length,
+    wins: wins.length,
+    losses: losses.length,
+    winRate: rows.length ? wins.length / rows.length * 100 : 0,
+    pnl,
+    avgR,
+    forecastAccuracy: rows.length ? forecastCorrect / rows.length * 100 : 0,
+    scenarioAccuracy: rows.length ? scenarioMatched / rows.length * 100 : 0,
+    avgLearningScore: learningScore,
+    profitFactor: grossLoss > 0 ? grossProfit / grossLoss : (grossProfit > 0 ? null : 0),
+    generatedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
 }
 
 function lessonForReport(report) {
