@@ -131,10 +131,12 @@ async function modelEvaluation(env) {
 async function forwardOpenWithLeverage(request) {
   const body = await request.json().catch(() => ({}));
   body.leverage = PAPER_LEVERAGE;
-  return new Request(request, {
+  const headers = new Headers(request.headers);
+  headers.set('content-type', 'application/json');
+  return new Request(request.url, {
     method: 'POST',
-    body: JSON.stringify(body),
-    headers: new Headers({ ...Object.fromEntries(request.headers), 'content-type': 'application/json' })
+    headers,
+    body: JSON.stringify(body)
   });
 }
 
