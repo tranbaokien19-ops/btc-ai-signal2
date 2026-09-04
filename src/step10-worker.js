@@ -14,11 +14,11 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), {
   }
 });
 
-async function paper(env, path) {
+async function paper(env, path, init = {}) {
   if (!env.PAPER_TRADING) throw new Error('Chưa có binding PAPER_TRADING');
   const id = env.PAPER_TRADING.idFromName('btc-ai-signal2-paper');
   const stub = env.PAPER_TRADING.get(id);
-  const r = await stub.fetch(`https://paper${path}`);
+  const r = await stub.fetch(`https://paper${path}`, init);
   const d = await r.json();
   if (!r.ok || d.ok === false) throw new Error(d.error || `Paper HTTP ${r.status}`);
   return d;
