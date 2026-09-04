@@ -219,50 +219,30 @@ function lessonForReport(report) {
 }
 
 async function dailyLearningReportApi(env) {
-  // Không phụ thuộc route /daily-reports để tránh một lỗi ở snapshot
-  // làm treo toàn bộ khung báo cáo. Đọc learning trực tiếp, dựng báo cáo
-  // hôm nay, sau đó lưu snapshot best-effort.
-  const learningRes = await paper(env, '/learning?limit=200', { method: 'GET' });
+  // Một request duy nhất tới Durable Object: backfill learning (nếu cần),
+  // đồng thời nhận dailyReports đã lưu. Tránh chuỗi POST/GET khiến UI chờ lâu.
+  const learningRes = await paper(env, '/learning?limit=200', { method:'GET' });
   const rows = Array.isArray(learningRes.learning) ? learningRes.learning : [];
   const todayDate = vnDate(new Date().toISOString());
   const today = dailyReportForDate({ learning: rows }, todayDate);
-
-  let savedReports = 0;
-  try {
-    const saveRes = await paper(env, '/daily-report', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ dateVN: todayDate })
-    });
-    savedReports = Number(saveRes.savedReports || 0);
-  } catch (_) {
-    // Báo cáo vẫn hiển thị được nếu bước lưu snapshot tạm thời lỗi.
-  }
-
-  let history = [];
-  try {
-    const reportsRes = await paper(env, '/daily-reports?limit=14', { method: 'GET' });
-    history = Array.isArray(reportsRes.reports) ? reportsRes.reports : [];
-    savedReports = Number(reportsRes.savedReports || savedReports);
-  } catch (_) {
-    history = [];
-  }
-  if (!history.some(r => r && r.dateVN === todayDate)) history.unshift(today);
-
+  const stored = Array.isArray(learningRes.dailyReports) ? learningRes.dailyReports : [];
+  const history = stored.filter(r => r && r.dateVN !== todayDate);
+  history.push(today);
+  history.sort((a,b) => String(b.dateVN).localeCompare(String(a.dateVN)));
   return {
     ok:true,
-    dateVN: todayDate,
+    dateVN:todayDate,
     summary: {
-      trades: today.trades, wins: today.wins, losses: today.losses,
-      winRate: today.winRate, pnl: today.pnl, avgR: today.avgR,
-      forecastAccuracy: today.forecastAccuracy, scenarioAccuracy: today.scenarioAccuracy,
-      avgLearningScore: today.avgLearningScore, profitFactor: today.profitFactor
+      trades:today.trades,wins:today.wins,losses:today.losses,winRate:today.winRate,
+      pnl:today.pnl,avgR:today.avgR,forecastAccuracy:today.forecastAccuracy,
+      scenarioAccuracy:today.scenarioAccuracy,avgLearningScore:today.avgLearningScore,
+      profitFactor:today.profitFactor
     },
-    summaryText: dailyReportSummaryText(today),
-    lessonText: lessonForReport(today),
-    reports: history.slice(0,14),
-    savedReports,
-    generatedAt: today.generatedAt,
+    summaryText:dailyReportSummaryText(today),
+    lessonText:lessonForReport(today),
+    reports:history.slice(0,14),
+    savedReports:stored.length,
+    generatedAt:today.generatedAt,
     source:'PERSISTED DEMO closed trades / AI learning',
     timezone:'Asia/Ho_Chi_Minh'
   };
