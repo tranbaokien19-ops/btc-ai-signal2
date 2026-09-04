@@ -285,7 +285,16 @@ export class PaperTrading extends DurableObject {
       if (report && !reports.some(r => r.dateVN === today)) reports.unshift(report);
       return Response.json({ ok: true, today: report, reports, savedReports: (s.dailyReports || []).length, updatedAt: s.updatedAt });
     }
-    if (url.pathname === '/learning' && method === 'GET') { const added=backfillLearning(s); if(added) await this.saveState(s); const limit = Math.max(1, Math.min(200, Math.floor(num(url.searchParams.get('limit'), 50)))); return Response.json({ ok: true, learning: (s.learning || []).slice(-limit), stats: learningStats(s), backfilled: added, updatedAt: s.updatedAt }); }
+    if (url.pathname === '/learning' && method === 'GET') {
+      const added=backfillLearning(s);
+      if(added){
+        const dates=[...new Set((s.learning||[]).slice(-added).map(x=>vnDate(x.evaluatedAt)).filter(Boolean))];
+        for(const date of dates) upsertDailyReport(s,date);
+        await this.saveState(s);
+      }
+      const limit = Math.max(1, Math.min(200, Math.floor(num(url.searchParams.get('limit'), 50))));
+      return Response.json({ ok: true, learning: (s.learning || []).slice(-limit), stats: learningStats(s), backfilled: added, dailyReports: (s.dailyReports||[]).slice(-14).reverse(), updatedAt: s.updatedAt });
+    }
     if (url.pathname === '/history' && method === 'GET') {
       const limit = Math.max(1, Math.min(200, Math.floor(num(url.searchParams.get('limit'), 50))));
       return Response.json({ ok: true, trades: s.trades.slice(-limit), stats: closedStats(s), updatedAt: s.updatedAt });
