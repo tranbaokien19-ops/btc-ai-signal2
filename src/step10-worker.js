@@ -188,13 +188,39 @@ function lessonForReport(report) {
 }
 
 async function dailyLearningReportApi(env) {
-  // Dùng một request GET duy nhất. Endpoint /daily-reports đã tự
-  // backfill learning và cập nhật snapshot của hôm nay.
-  const reportsRes = await paper(env, '/daily-reports?limit=14', { method: 'GET' });
-  const today = reportsRes.today;
+  // Không phụ thuộc route /daily-reports để tránh một lỗi ở snapshot
+  // làm treo toàn bộ khung báo cáo. Đọc learning trực tiếp, dựng báo cáo
+  // hôm nay, sau đó lưu snapshot best-effort.
+  const learningRes = await paper(env, '/learning?limit=200', { method: 'GET' });
+  const rows = Array.isArray(learningRes.learning) ? learningRes.learning : [];
+  const todayDate = vnDate(new Date().toISOString());
+  const today = dailyReportForDate({ learning: rows }, todayDate);
+
+  let savedReports = 0;
+  try {
+    const saveRes = await paper(env, '/daily-report', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ dateVN: todayDate })
+    });
+    savedReports = Number(saveRes.savedReports || 0);
+  } catch (_) {
+    // Báo cáo vẫn hiển thị được nếu bước lưu snapshot tạm thời lỗi.
+  }
+
+  let history = [];
+  try {
+    const reportsRes = await paper(env, '/daily-reports?limit=14', { method: 'GET' });
+    history = Array.isArray(reportsRes.reports) ? reportsRes.reports : [];
+    savedReports = Number(reportsRes.savedReports || savedReports);
+  } catch (_) {
+    history = [];
+  }
+  if (!history.some(r => r && r.dateVN === todayDate)) history.unshift(today);
+
   return {
     ok:true,
-    dateVN: today.dateVN,
+    dateVN: todayDate,
     summary: {
       trades: today.trades, wins: today.wins, losses: today.losses,
       winRate: today.winRate, pnl: today.pnl, avgR: today.avgR,
@@ -203,8 +229,8 @@ async function dailyLearningReportApi(env) {
     },
     summaryText: dailyReportSummaryText(today),
     lessonText: lessonForReport(today),
-    reports: reportsRes.reports || [],
-    savedReports: reportsRes.savedReports || 0,
+    reports: history.slice(0,14),
+    savedReports,
     generatedAt: today.generatedAt,
     source:'PERSISTED DEMO closed trades / AI learning',
     timezone:'Asia/Ho_Chi_Minh'
