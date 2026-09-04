@@ -133,19 +133,6 @@ const DAILY_PANEL = `
 </div>
 <style>@media(max-width:900px){#daily-report-grid{grid-template-columns:repeat(2,minmax(150px,1fr))!important}}@media(max-width:600px){#daily-report-grid{grid-template-columns:1fr!important}}</style>
 `;
-const DAILY_PANEL = `
-<div id="daily-learning-report" style="margin-top:18px;background:#121a2f;border:1px solid #293756;border-radius:12px;padding:16px">
-  <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
-    <b>BÁO CÁO HỌC AI — HÔM NAY</b><span id="daily-report-status" style="color:#94a3c5">Đang tải...</span>
-  </div>
-  <div id="daily-report-grid" style="display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:8px;margin-top:12px"></div>
-  <div id="daily-report-summary" style="margin-top:10px;padding:11px 12px;border-radius:8px;background:#0a1122;border:1px solid #293756;color:#d7e0f2;line-height:1.6">Đang tải báo cáo học hôm nay...</div>
-  <div id="daily-report-lessons" style="margin-top:8px;padding:11px 12px;border-radius:8px;background:#080f1e;border:1px solid #293756;color:#d7e0f2;line-height:1.6">Bài học AI: đang phân tích...</div>
-  <div id="daily-report-history" style="margin-top:10px;padding:11px 12px;border-radius:8px;background:#080f1e;border:1px solid #293756;color:#d7e0f2;line-height:1.55">Lịch sử báo cáo: đang tải...</div>
-  <div style="margin-top:8px;color:#94a3c5;font-size:12px">Báo cáo được lưu theo từng ngày Việt Nam (UTC+7), dựa trên các lệnh DEMO đã đóng và dữ liệu AI learning.</div>
-</div>
-<style>@media(max-width:900px){#daily-report-grid{grid-template-columns:repeat(2,minmax(150px,1fr))!important}}@media(max-width:600px){#daily-report-grid{grid-template-columns:1fr!important}}</style>
-`;
 const DAILY_REPORT_SCRIPT = `
 <script>
 (function(){
