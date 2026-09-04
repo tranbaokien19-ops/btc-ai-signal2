@@ -131,49 +131,44 @@ function vnDate(iso) {
   return new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Ho_Chi_Minh', year:'numeric', month:'2-digit', day:'2-digit' }).format(d);
 }
 
-function dailyLearningReport(rows) {
-  const today = vnDate(new Date().toISOString());
-  const data = rows
-    .filter(r => r && r.closedAt && vnDate(r.closedAt) === today)
-    .filter(r => Number.isFinite(Number(r.realizedPnl)));
-  const wins = data.filter(r => Number(r.realizedPnl) > 0);
-  const losses = data.filter(r => Number(r.realizedPnl) < 0);
-  const pnl = data.reduce((a,r) => a + Number(r.realizedPnl), 0);
-  const avgR = data.length ? data.reduce((a,r) => a + (Number(r.realizedR)||0), 0) / data.length : 0;
-  const forecastCorrect = data.filter(r => r.forecastDirectionCorrect === true || r.forecastDirectionCorrect === 'true').length;
-  const scenarioMatched = data.filter(r => r.scenarioMatched === true || r.scenarioMatched === 'true').length;
-  const avgLearningScore = data.length ? data.reduce((a,r) => a + (Number(r.learningScore)||0), 0) / data.length : 0;
-  const accuracy = data.length ? forecastCorrect / data.length * 100 : 0;
-  const scenarioAccuracy = data.length ? scenarioMatched / data.length * 100 : 0;
-  const winRate = data.length ? wins.length / data.length * 100 : 0;
-  const grossProfit = wins.reduce((a,r)=>a+Number(r.realizedPnl),0);
-  const grossLoss = Math.abs(losses.reduce((a,r)=>a+Number(r.realizedPnl),0));
-  const pf = grossLoss > 0 ? grossProfit / grossLoss : (grossProfit > 0 ? null : 0);
-
-  let lesson;
-  if (!data.length) lesson = 'Bài học AI: hôm nay chưa có lệnh DEMO đóng đủ điều kiện để kết luận. Tiếp tục thu thập dữ liệu, không tự thay model.';
-  else if (accuracy < 50) lesson = 'Bài học AI: dự báo hướng hôm nay còn yếu. Ưu tiên kiểm tra sai lệch giữa forecast 24H và thực tế, không tăng rủi ro để bù lỗ.';
-  else if (scenarioAccuracy < 50) lesson = 'Bài học AI: hướng có thể đúng nhưng vùng vào chưa tốt. Cần cải thiện xác định vùng hỗ trợ/kháng cự và trigger xác nhận.';
-  else if (pnl < 0) lesson = 'Bài học AI: mô hình có tín hiệu đúng nhưng hiệu quả P&L hôm nay âm. Cần kiểm tra entry, SL/TP và timing trước khi thay model.';
-  else lesson = 'Bài học AI: kết quả hôm nay đang tích cực. Giữ model hiện tại và tiếp tục kiểm định bằng mẫu mới; chưa promote chỉ vì một ngày tốt.';
-
-  const summaryText = data.length
-    ? 'Kết luận hôm nay: '+data.length+' lệnh học | '+wins.length+' thắng / '+losses.length+' thua | P&L '+pnl.toFixed(2)+' | Win rate '+winRate.toFixed(2)+'% | Forecast đúng '+accuracy.toFixed(2)+'% | Scenario khớp '+scenarioAccuracy.toFixed(2)+'% | PF '+(pf==null?'∞':pf.toFixed(2))+'.'
-    : 'Kết luận hôm nay: chưa có lệnh DEMO đóng trong ngày để đánh giá.';
-
-  return {
-    dateVN: today,
-    summary: { trades:data.length, wins:wins.length, losses:losses.length, winRate, pnl, avgR, forecastAccuracy:accuracy, scenarioAccuracy, avgLearningScore, profitFactor:pf },
-    summaryText,
-    lessonText: lesson,
-    generatedAt: new Date().toISOString()
-  };
+function lessonForReport(report) {
+  if (!report || !report.trades) return 'Bài học AI: hôm nay chưa có lệnh DEMO đóng đủ điều kiện để kết luận. Tiếp tục thu thập dữ liệu, không tự thay model.';
+  if (Number(report.forecastAccuracy) < 50) return 'Bài học AI: dự báo hướng hôm nay còn yếu. Ưu tiên kiểm tra sai lệch giữa forecast 24H và thực tế, không tăng rủi ro để bù lỗ.';
+  if (Number(report.scenarioAccuracy) < 50) return 'Bài học AI: hướng có thể đúng nhưng vùng vào chưa tốt. Cần cải thiện xác định vùng hỗ trợ/kháng cự và trigger xác nhận.';
+  if (Number(report.pnl) < 0) return 'Bài học AI: tín hiệu có điểm đúng nhưng P&L hôm nay âm. Cần kiểm tra entry, SL/TP và timing trước khi thay model.';
+  return 'Bài học AI: kết quả hôm nay đang tích cực. Giữ model hiện tại và tiếp tục kiểm định bằng mẫu mới; chưa promote chỉ vì một ngày tốt.';
 }
 
 async function dailyLearningReportApi(env) {
-  const learning = await paper(env, '/learning?limit=500');
-  const rows = Array.isArray(learning.learning) ? learning.learning : [];
-  return { ok:true, ...dailyLearningReport(rows), source:'DEMO closed trades / AI learning', timezone:'Asia/Ho_Chi_Minh' };
+  const saved = await paper(env, '/daily-report', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ dateVN: vnDate(new Date().toISOString()) })
+  });
+  const reportsRes = await paper(env, '/daily-reports?limit=14');
+  const today = saved.report || reportsRes.today;
+  return {
+    ok:true,
+    dateVN: today.dateVN,
+    summary: {
+      trades: today.trades, wins: today.wins, losses: today.losses,
+      winRate: today.winRate, pnl: today.pnl, avgR: today.avgR,
+      forecastAccuracy: today.forecastAccuracy, scenarioAccuracy: today.scenarioAccuracy,
+      avgLearningScore: today.avgLearningScore, profitFactor: today.profitFactor
+    },
+    summaryText: dailyReportSummaryText(today),
+    lessonText: lessonForReport(today),
+    reports: reportsRes.reports || [],
+    savedReports: reportsRes.savedReports || 0,
+    generatedAt: today.generatedAt,
+    source:'PERSISTED DEMO closed trades / AI learning',
+    timezone:'Asia/Ho_Chi_Minh'
+  };
+}
+
+function dailyReportSummaryText(report) {
+  if (!report || !report.trades) return 'Kết luận hôm nay: chưa có lệnh DEMO đóng trong ngày để đánh giá.';
+  return 'Kết luận hôm nay: '+report.trades+' lệnh học | '+report.wins+' thắng / '+report.losses+' thua | P&L '+Number(report.pnl||0).toFixed(2)+' | Win rate '+Number(report.winRate||0).toFixed(2)+'% | Forecast đúng '+Number(report.forecastAccuracy||0).toFixed(2)+'% | Scenario khớp '+Number(report.scenarioAccuracy||0).toFixed(2)+'% | PF '+(report.profitFactor==null?'∞':Number(report.profitFactor).toFixed(2))+'.';
 }
 
 async function modelEvaluation(env) {
@@ -224,7 +219,16 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    if (typeof baseWorker.scheduled === 'function') return baseWorker.scheduled(controller, env, ctx);
+    if (typeof baseWorker.scheduled === 'function') await baseWorker.scheduled(controller, env, ctx);
+    try {
+      await paper(env, '/daily-report', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ dateVN: vnDate(new Date().toISOString()) })
+      });
+    } catch (_e) {
+      // Best-effort persistence; never break the paper/market cron.
+    }
   }
 };
 
