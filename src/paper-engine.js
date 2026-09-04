@@ -44,7 +44,7 @@ function snapshotPosition(p, price, at = Date.now()) {
 
 
 function evaluateLearning(trade) {
-  if (!trade || trade.learningEligible !== true) return null;
+  if (!trade || (trade.learningEligible !== true && !String(trade.signal || '').startsWith('AUTO_'))) return null;
   const snap = trade.signalSnapshot || {};
   const f = snap.forecast24h || {};
   const actualMove = Number(trade.exit) - Number(trade.entry);
@@ -87,8 +87,21 @@ function learningStats(s) {
 function recordLearning(s, closed) {
   const row = evaluateLearning(closed);
   if (!row) return null;
+  const existing = new Set((s.learning || []).map(x => x.tradeId));
+  if (existing.has(row.tradeId)) return row;
   s.learning = [...(Array.isArray(s.learning) ? s.learning : []), row].slice(-MAX_TRADES);
   return row;
+}
+function backfillLearning(s) {
+  const existing = new Set((s.learning || []).map(x => x.tradeId));
+  const rows = [];
+  for (const trade of (s.trades || []).filter(t => t.status === 'CLOSED')) {
+    if (existing.has(trade.id)) continue;
+    const row = evaluateLearning(trade);
+    if (row) { rows.push(row); existing.add(row.tradeId); }
+  }
+  if (rows.length) s.learning = [...(Array.isArray(s.learning) ? s.learning : []), ...rows].slice(-MAX_TRADES);
+  return rows.length;
 }
 
 function closedStats(s) {
@@ -213,7 +226,7 @@ export class PaperTrading extends DurableObject {
       s.capital += closed.realizedPnl; s.realizedPnl += closed.realizedPnl; s.position = null; s.trades = s.trades.map(t => t.id === closed.id ? closed : t); const learning = recordLearning(s, closed); closed.learning = learning; s.trades = s.trades.map(t => t.id === closed.id ? closed : t); await this.ctx.storage.deleteAlarm(); await this.saveState(s);
       return Response.json({ ok: true, closed, learning, learningStats: learningStats(s), ...s, equity: s.capital, stats: closedStats(s) });
     }
-    if (url.pathname === '/learning' && method === 'GET') { const limit = Math.max(1, Math.min(200, Math.floor(num(url.searchParams.get('limit'), 50)))); return Response.json({ ok: true, learning: (s.learning || []).slice(-limit), stats: learningStats(s), updatedAt: s.updatedAt }); }
+    if (url.pathname === '/learning' && method === 'GET') { const added=backfillLearning(s); if(added) await this.saveState(s); const limit = Math.max(1, Math.min(200, Math.floor(num(url.searchParams.get('limit'), 50)))); return Response.json({ ok: true, learning: (s.learning || []).slice(-limit), stats: learningStats(s), backfilled: added, updatedAt: s.updatedAt }); }
     if (url.pathname === '/history' && method === 'GET') {
       const limit = Math.max(1, Math.min(200, Math.floor(num(url.searchParams.get('limit'), 50))));
       return Response.json({ ok: true, trades: s.trades.slice(-limit), stats: closedStats(s), updatedAt: s.updatedAt });
