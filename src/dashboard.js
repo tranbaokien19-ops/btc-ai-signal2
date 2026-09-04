@@ -115,6 +115,40 @@ async function tick(){try{
   renderTF(liveTF);const tm=new Date(m.updatedAt||tf.updatedAt);$('updated').textContent='Cập nhật '+tm.toLocaleTimeString('vi-VN');$('status').innerHTML='<span class="good">✓ Đã đồng bộ</span> | '+tf.source+' | <span class="live">5 EMA realtime theo đúng timeframe</span> | M30=2×M15, H4=4×H1 | Giá '+fmt(m.price)+' | '+tm.toLocaleTimeString('vi-VN');
 }catch(e){$('status').innerHTML='<span class="error">Lỗi: '+esc(e.message)+'</span>'}}
 
-tick();setInterval(tick,1000);addEventListener('resize',()=>document.querySelectorAll('canvas').forEach((c)=>{const i=c.id.startsWith('tf-')?Number(c.id.slice(3)):-1;if(i>=0&&window.__tf)drawCandles(c,window.__tf[i].candles)}));
+async function loadDailyReport(){
+  const status=document.getElementById('daily-report-status');
+  if(!status)return;
+  const f=n=>Number.isFinite(Number(n))?Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'--';
+  const pct=n=>Number.isFinite(Number(n))?Number(n).toFixed(2)+'%':'--';
+  const esc=v=>String(v??'').replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])).replace(/'/g,'&#39;');
+  const card=(title,v)=>'<div style="background:#0d1426;border-radius:8px;padding:10px">'+esc(title)+'<b style="display:block;margin-top:4px">'+esc(v)+'</b></div>';
+  try{
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),12000);
+    const r=await fetch('/api/paper/daily-learning-report?ts='+Date.now(),{cache:'no-store',signal:controller.signal});
+    clearTimeout(timer);
+    const d=await r.json();
+    if(!r.ok||d.ok===false)throw Error(d.error||('HTTP '+r.status));
+    const a=d.summary||{};
+    status.textContent='✓ BÁO CÁO '+(d.dateVN||'HÔM NAY'); status.style.color='#55dc92';
+    document.getElementById('daily-report-grid').innerHTML=
+      card('Lệnh học hôm nay',a.trades||0)+card('Thắng / Thua',(a.wins||0)+' / '+(a.losses||0))+
+      card('Win rate',pct(a.winRate))+card('P&L',f(a.pnl))+card('Avg R',Number(a.avgR||0).toFixed(2)+'R')+
+      card('Forecast đúng',pct(a.forecastAccuracy))+card('Scenario khớp',pct(a.scenarioAccuracy))+
+      card('Learning score',Number(a.avgLearningScore||0).toFixed(2));
+    document.getElementById('daily-report-summary').textContent=d.summaryText||'Chưa có dữ liệu.';
+    document.getElementById('daily-report-lessons').textContent=d.lessonText||'Chưa có bài học.';
+    const hist=(d.reports||[]).map(x=>'<div style="padding:7px 0;border-bottom:1px solid #293756"><b>'+esc(x.dateVN)+'</b> | '+esc(x.trades)+' lệnh | W/L '+esc(x.wins)+'/'+esc(x.losses)+' | WR '+pct(x.winRate)+' | P&L '+f(x.pnl)+' | Avg R '+Number(x.avgR||0).toFixed(2)+' | Forecast '+pct(x.forecastAccuracy)+'</div>').join('');
+    document.getElementById('daily-report-history').innerHTML='<b>LỊCH SỬ BÁO CÁO — 14 NGÀY GẦN NHẤT</b><div style="margin-top:6px">'+(hist||'Chưa có báo cáo đã lưu.')+'</div>';
+  }catch(e){
+    status.textContent=e.name==='AbortError'?'✕ DAILY REPORT TIMEOUT':'✕ DAILY REPORT ERROR'; status.style.color='#ff7181';
+    document.getElementById('daily-report-summary').textContent='Lỗi tải báo cáo: '+(e.message||'Không đọc được dữ liệu');
+    document.getElementById('daily-report-lessons').textContent='Bài học AI: chưa thể tổng hợp do lỗi tải báo cáo.';
+    document.getElementById('daily-report-history').textContent='Lịch sử báo cáo: chưa tải được.';
+  }
+}
+tick();setInterval(tick,1000);
+addEventListener('resize',()=>document.querySelectorAll('canvas').forEach((c)=>{const i=c.id.startsWith('tf-')?Number(c.id.slice(3)):-1;if(i>=0&&window.__tf)drawCandles(c,window.__tf[i].candles)}));
+addEventListener('DOMContentLoaded',()=>{loadDailyReport();setInterval(loadDailyReport,60000)});
 </script></body></html>`;
 }
