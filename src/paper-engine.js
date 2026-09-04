@@ -129,6 +129,8 @@ function recordLearning(s, closed) {
   const existing = new Set((s.learning || []).map(x => x.tradeId));
   if (existing.has(row.tradeId)) return row;
   s.learning = [...(Array.isArray(s.learning) ? s.learning : []), row].slice(-MAX_TRADES);
+  // Lưu snapshot báo cáo ngay khi lệnh học được ghi nhận, không phụ thuộc vào lần mở dashboard.
+  upsertDailyReport(s, vnDate(row.evaluatedAt));
   return row;
 }
 function backfillLearning(s) {
