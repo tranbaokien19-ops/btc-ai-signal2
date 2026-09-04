@@ -1,4 +1,4 @@
-import baseWorker from './demo-worker.js';
+import baseWorker, { PaperTrading } from './demo-worker.js';
 
 const MODEL_ACTIVE = 'rule-v1';
 const MODEL_CANDIDATE = 'rule-v2-shadow';
@@ -167,3 +167,5 @@ export default {
     if (typeof baseWorker.scheduled === 'function') return baseWorker.scheduled(controller, env, ctx);
   }
 };
+
+export { PaperTrading };
