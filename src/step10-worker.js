@@ -133,51 +133,6 @@ const DAILY_PANEL = `
 </div>
 <style>@media(max-width:900px){#daily-report-grid{grid-template-columns:repeat(2,minmax(150px,1fr))!important}}@media(max-width:600px){#daily-report-grid{grid-template-columns:1fr!important}}</style>
 `;
-const DAILY_REPORT_SCRIPT = `
-<script>
-(function(){
-  const f=n=>Number.isFinite(Number(n))?Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}):"--";
-  const pct=n=>Number.isFinite(Number(n))?Number(n).toFixed(2)+"%":"--";
-  const esc=v=>String(v??"").replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m])).replace(/'/g,"&#39;");
-  const card=(title,v)=>"<div style=\"background:#0d1426;border-radius:8px;padding:10px\">"+esc(title)+"<b style=\"display:block;margin-top:4px\">"+esc(v)+"</b></div>";
-  async function load(){
-    const status=document.getElementById("daily-report-status");
-    try{
-      const controller=new AbortController();
-      const timer=setTimeout(()=>controller.abort(),12000);
-      const r=await fetch("/api/paper/daily-learning-report?ts="+Date.now(),{cache:"no-store",signal:controller.signal});
-      clearTimeout(timer);
-      const d=await r.json();
-      if(!r.ok||d.ok===false) throw Error(d.error||("HTTP "+r.status));
-      const a=d.summary||{};
-      status.textContent="✓ BÁO CÁO "+(d.dateVN||"HÔM NAY");
-      status.style.color="#55dc92";
-      document.getElementById("daily-report-grid").innerHTML=
-        card("Lệnh học hôm nay",a.trades||0)+
-        card("Thắng / Thua",(a.wins||0)+" / "+(a.losses||0))+
-        card("Win rate",pct(a.winRate))+
-        card("P&L",f(a.pnl))+
-        card("Avg R",Number(a.avgR||0).toFixed(2)+"R")+
-        card("Forecast đúng",pct(a.forecastAccuracy))+
-        card("Scenario khớp",pct(a.scenarioAccuracy))+
-        card("Learning score",Number(a.avgLearningScore||0).toFixed(2));
-      document.getElementById("daily-report-summary").textContent=d.summaryText||"Chưa có dữ liệu.";
-      document.getElementById("daily-report-lessons").textContent=d.lessonText||"Chưa có bài học.";
-      const hist=(d.reports||[]).map(x=>"<div style=\"padding:7px 0;border-bottom:1px solid #293756\"><b>"+esc(x.dateVN)+"</b> | "+esc(x.trades)+" lệnh | W/L "+esc(x.wins)+"/"+esc(x.losses)+" | WR "+pct(x.winRate)+" | P&L "+f(x.pnl)+" | Avg R "+Number(x.avgR||0).toFixed(2)+" | Forecast "+pct(x.forecastAccuracy)+"</div>").join("");
-      document.getElementById("daily-report-history").innerHTML="<b>LỊCH SỬ BÁO CÁO — 14 NGÀY GẦN NHẤT</b><div style=\"margin-top:6px\">"+(hist||"Chưa có báo cáo đã lưu.")+"</div>";
-    }catch(e){
-      status.textContent=e.name==="AbortError"?"✕ DAILY REPORT TIMEOUT":"✕ DAILY REPORT ERROR";
-      status.style.color="#ff7181";
-      document.getElementById("daily-report-summary").textContent="Lỗi tải báo cáo: "+(e.message||"Không đọc được dữ liệu");
-      document.getElementById("daily-report-lessons").textContent="Bài học AI: chưa thể tổng hợp do lỗi tải báo cáo.";
-      document.getElementById("daily-report-history").textContent="Lịch sử báo cáo: chưa tải được.";
-    }
-  }
-  load();
-  setInterval(load,60000);
-})();
-</script>
-`;
 const PANEL = `<div id="model-evaluation" style="margin-top:18px;background:#121a2f;border:1px solid #293756;border-radius:12px;padding:16px"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>BƯỚC 10 — KIỂM ĐỊNH MODEL</b><span id="model-status" style="color:#94a3c5">Đang kiểm tra...</span></div><div id="model-grid" style="display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:8px;margin-top:12px"></div><div id="model-decision" style="margin-top:10px;padding:10px 12px;border-radius:8px;background:#0a1122;border:1px solid #293756;color:#d7e0f2;line-height:1.55">Đang tải...</div><div style="margin-top:8px;color:#94a3c5;font-size:12px">Candidate là shadow model để kiểm định trên chính các lệnh DEMO đã đóng. Chưa đủ bằng chứng thì không thay Active.</div></div><style>@media(max-width:900px){#model-grid{grid-template-columns:repeat(2,minmax(150px,1fr))!important}}@media(max-width:600px){#model-grid{grid-template-columns:1fr!important}}</style><script>(async()=>{const f=n=>Number.isFinite(Number(n))?Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'--';const pct=n=>Number.isFinite(Number(n))?Number(n).toFixed(2)+'%':'--';const card=(title,v)=>'<div style="background:#0d1426;border-radius:8px;padding:10px">'+title+'<b style="display:block;margin-top:4px">'+v+'</b></div>';async function check(){try{const r=await fetch('/api/paper/model-evaluation?ts='+Date.now(),{cache:'no-store'}),d=await r.json();if(!r.ok||d.ok===false)throw Error(d.error||('HTTP '+r.status));const a=d.active,c=d.candidate;document.getElementById('model-status').textContent='✓ MODEL EVALUATOR ONLINE';document.getElementById('model-status').style.color='#55dc92';document.getElementById('model-grid').innerHTML=card('Active',a.model)+card('Candidate',c.model)+card('Mẫu kiểm định',d.evaluatedTrades+'/'+d.minimumTrades)+card('Quyết định',d.decision)+card('Active P&L',f(a.pnl))+card('Candidate Shadow P&L',f(c.pnl))+card('Active Avg R',Number(a.avgR).toFixed(2)+'R')+card('Candidate Avg R',Number(c.avgR).toFixed(2)+'R')+card('Active PF',a.profitFactor==null?'∞':Number(a.profitFactor).toFixed(2))+card('Candidate PF',c.profitFactor==null?'∞':Number(c.profitFactor).toFixed(2))+card('Active DD',f(a.maxDrawdown))+card('Candidate DD',f(c.maxDrawdown))+card('Active Accuracy',pct(a.forecastAccuracy))+card('Candidate Accuracy',pct(c.forecastAccuracy))+card('Candidate Coverage',pct(c.coverage));document.getElementById('model-decision').textContent=(d.decision==='PROMOTE_READY'?'✓ Candidate đạt điều kiện promote nhưng chưa tự áp dụng.':'⏸ Giữ Active: ')+d.reason}catch(e){document.getElementById('model-status').textContent='✕ MODEL EVALUATOR ERROR';document.getElementById('model-status').style.color='#ff7181';document.getElementById('model-decision').textContent='Lỗi: '+e.message}}check();setInterval(check,10000)})();</script>`;
 
 
@@ -301,8 +256,7 @@ export default {
 
     const html = await response.text();
     const injected = html.includes('id="daily-learning-report"') ? html : html.replace('</main>', PANEL + DAILY_PANEL + '</main>');
-    const finalHtml = injected.includes('id="daily-report-status"') && !injected.includes('DAILY_REPORT_SCRIPT') ? injected.replace('</body></html>', DAILY_REPORT_SCRIPT + '</body></html>') : injected;
-    const out = new Response(finalHtml, response);
+    const out = new Response(injected, response);
     out.headers.set('cache-control', 'no-store');
     return out;
   },
