@@ -2,7 +2,8 @@ import { DurableObject } from 'cloudflare:workers';
 
 const DEFAULT_CAPITAL = 1000000;
 const MAX_TRADES = 5000;
-const MIN_LEVERAGE = 10;
+const MAX_DAILY_REPORTS = 366;
+const MIN_LEVERAGE = 3;
 const DEFAULT_LEVERAGE = MIN_LEVERAGE;
 const DEFAULT_RISK_PCT = 0.5;
 const MIN_RISK_PCT = 0.1;
@@ -84,6 +85,44 @@ function learningStats(s) {
     modelVersion: 'rule-v1'
   };
 }
+function dailyReportForDate(s, dateVN) {
+  const rows = (s.learning || []).filter(r => r && r.evaluatedAt && vnDate(r.evaluatedAt) === dateVN && Number.isFinite(Number(r.realizedPnl)));
+  const wins = rows.filter(r => Number(r.realizedPnl) > 0);
+  const losses = rows.filter(r => Number(r.realizedPnl) < 0);
+  const pnl = rows.reduce((a,r) => a + Number(r.realizedPnl), 0);
+  const avgR = rows.length ? rows.reduce((a,r) => a + (Number(r.realizedR) || 0), 0) / rows.length : 0;
+  const forecastCorrect = rows.filter(r => r.forecastDirectionCorrect === true).length;
+  const scenarioMatched = rows.filter(r => r.scenarioMatched === true).length;
+  const learningScore = rows.length ? rows.reduce((a,r) => a + (Number(r.learningScore) || 0), 0) / rows.length : 0;
+  const grossProfit = wins.reduce((a,r) => a + Number(r.realizedPnl), 0);
+  const grossLoss = Math.abs(losses.reduce((a,r) => a + Number(r.realizedPnl), 0));
+  const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : (grossProfit > 0 ? null : 0);
+  const winRate = rows.length ? wins.length / rows.length * 100 : 0;
+  const forecastAccuracy = rows.length ? forecastCorrect / rows.length * 100 : 0;
+  const scenarioAccuracy = rows.length ? scenarioMatched / rows.length * 100 : 0;
+  return {
+    dateVN, trades: rows.length, wins: wins.length, losses: losses.length,
+    winRate, pnl, avgR, forecastAccuracy, scenarioAccuracy,
+    avgLearningScore: learningScore, profitFactor,
+    generatedAt: nowIso(), updatedAt: nowIso()
+  };
+}
+function vnDate(iso) {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return null;
+  return new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Ho_Chi_Minh', year:'numeric', month:'2-digit', day:'2-digit' }).format(d);
+}
+function upsertDailyReport(s, dateVN = vnDate(new Date().toISOString())) {
+  const report = dailyReportForDate(s, dateVN);
+  const rows = Array.isArray(s.dailyReports) ? s.dailyReports.filter(r => r.dateVN !== dateVN) : [];
+  s.dailyReports = [...rows, report].sort((a,b) => String(a.dateVN).localeCompare(String(b.dateVN))).slice(-MAX_DAILY_REPORTS);
+  return report;
+}
+function dailyReportSummary(report) {
+  if (!report || !report.trades) return 'Chưa có lệnh học đóng đủ điều kiện trong ngày.';
+  return report.trades+' lệnh | '+report.wins+' thắng / '+report.losses+' thua | P&L '+Number(report.pnl||0).toFixed(2)+' | Win rate '+Number(report.winRate||0).toFixed(2)+'% | Forecast đúng '+Number(report.forecastAccuracy||0).toFixed(2)+'% | Scenario khớp '+Number(report.scenarioAccuracy||0).toFixed(2)+'% | Learning '+Number(report.avgLearningScore||0).toFixed(2);
+}
+
 function recordLearning(s, closed) {
   const row = evaluateLearning(closed);
   if (!row) return null;
@@ -121,7 +160,7 @@ export class PaperTrading extends DurableObject {
 
   async getState() {
     const s = await this.ctx.storage.get('state');
-    return s || { initialCapital: DEFAULT_CAPITAL, capital: DEFAULT_CAPITAL, realizedPnl: 0, position: null, trades: [], learning: [], lastPrice: null, lastTickAt: null, engine: 'ONLINE', updatedAt: nowIso() };
+    return s || { initialCapital: DEFAULT_CAPITAL, capital: DEFAULT_CAPITAL, realizedPnl: 0, position: null, trades: [], learning: [], dailyReports: [], lastPrice: null, lastTickAt: null, engine: 'ONLINE', updatedAt: nowIso() };
   }
   async saveState(s) { s.updatedAt = nowIso(); await this.ctx.storage.put('state', s); return s; }
 
@@ -190,7 +229,7 @@ export class PaperTrading extends DurableObject {
     }
     if (url.pathname === '/reset' && method === 'POST') {
       const body = await request.json().catch(() => ({})); const capital = Math.max(1000, num(body.capital, DEFAULT_CAPITAL));
-      s = { initialCapital: capital, capital, realizedPnl: 0, position: null, trades: [], learning: [], lastPrice: null, lastTickAt: null, engine: 'ONLINE', updatedAt: nowIso() };
+      s = { initialCapital: capital, capital, realizedPnl: 0, position: null, trades: [], learning: [], dailyReports: [], lastPrice: null, lastTickAt: null, engine: 'ONLINE', updatedAt: nowIso() };
       await this.ctx.storage.deleteAlarm(); await this.saveState(s); return Response.json({ ok: true, ...s, stats: closedStats(s) });
     }
     if (url.pathname === '/open' && method === 'POST') {
@@ -225,6 +264,20 @@ export class PaperTrading extends DurableObject {
       const p = snapshotPosition(s.position, price); const closed = { ...p, status: 'CLOSED', exit: price, exitReason: String(b.reason || 'MANUAL'), closeSource: 'HTTP', closedAt: nowIso(), realizedPnl: p.unrealizedPnl, realizedR: p.unrealizedR, durationSec: Math.floor((Date.now() - new Date(p.openedAt).getTime()) / 1000) };
       s.capital += closed.realizedPnl; s.realizedPnl += closed.realizedPnl; s.position = null; s.trades = s.trades.map(t => t.id === closed.id ? closed : t); const learning = recordLearning(s, closed); closed.learning = learning; s.trades = s.trades.map(t => t.id === closed.id ? closed : t); await this.ctx.storage.deleteAlarm(); await this.saveState(s);
       return Response.json({ ok: true, closed, learning, learningStats: learningStats(s), ...s, equity: s.capital, stats: closedStats(s) });
+    }
+    if (url.pathname === '/daily-report' && method === 'POST') {
+      const body = await request.json().catch(() => ({}));
+      const dateVN = String(body.dateVN || vnDate(new Date().toISOString()));
+      const report = upsertDailyReport(s, dateVN);
+      await this.saveState(s);
+      return Response.json({ ok: true, report, summaryText: dailyReportSummary(report), savedReports: s.dailyReports.length, updatedAt: s.updatedAt });
+    }
+    if (url.pathname === '/daily-reports' && method === 'GET') {
+      const limit = Math.max(1, Math.min(MAX_DAILY_REPORTS, Math.floor(num(url.searchParams.get('limit'), 14))));
+      const today = vnDate(new Date().toISOString());
+      const report = upsertDailyReport(s, today);
+      await this.saveState(s);
+      return Response.json({ ok: true, today: report, reports: (s.dailyReports || []).slice(-limit).reverse(), savedReports: (s.dailyReports || []).length, updatedAt: s.updatedAt });
     }
     if (url.pathname === '/learning' && method === 'GET') { const added=backfillLearning(s); if(added) await this.saveState(s); const limit = Math.max(1, Math.min(200, Math.floor(num(url.searchParams.get('limit'), 50)))); return Response.json({ ok: true, learning: (s.learning || []).slice(-limit), stats: learningStats(s), backfilled: added, updatedAt: s.updatedAt }); }
     if (url.pathname === '/history' && method === 'GET') {
