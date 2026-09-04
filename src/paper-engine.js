@@ -276,14 +276,14 @@ export class PaperTrading extends DurableObject {
     }
     if (url.pathname === '/daily-reports' && method === 'GET') {
       const limit = Math.max(1, Math.min(MAX_DAILY_REPORTS, Math.floor(num(url.searchParams.get('limit'), 14))));
-      // Backfill report snapshots from existing learning rows, then keep today's
-      // snapshot fresh. This preserves history across deploys/restarts.
-      const dates = new Set((s.learning || []).map(r => vnDate(r.evaluatedAt)).filter(Boolean));
-      for (const date of dates) upsertDailyReport(s, date);
+      // GET phải nhẹ và không ghi storage. Việc lưu snapshot được thực hiện khi
+      // lệnh đóng (/close, alarm) và bởi cron /daily-report.
       const today = vnDate(new Date().toISOString());
-      const report = upsertDailyReport(s, today);
-      await this.saveState(s);
-      return Response.json({ ok: true, today: report, reports: (s.dailyReports || []).slice(-limit).reverse(), savedReports: (s.dailyReports || []).length, updatedAt: s.updatedAt });
+      let report = (s.dailyReports || []).find(r => r.dateVN === today);
+      if (!report) report = dailyReportForDate(s, today);
+      const reports = Array.isArray(s.dailyReports) ? s.dailyReports.slice(-limit).reverse() : [];
+      if (report && !reports.some(r => r.dateVN === today)) reports.unshift(report);
+      return Response.json({ ok: true, today: report, reports, savedReports: (s.dailyReports || []).length, updatedAt: s.updatedAt });
     }
     if (url.pathname === '/learning' && method === 'GET') { const added=backfillLearning(s); if(added) await this.saveState(s); const limit = Math.max(1, Math.min(200, Math.floor(num(url.searchParams.get('limit'), 50)))); return Response.json({ ok: true, learning: (s.learning || []).slice(-limit), stats: learningStats(s), backfilled: added, updatedAt: s.updatedAt }); }
     if (url.pathname === '/history' && method === 'GET') {
