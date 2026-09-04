@@ -140,7 +140,10 @@ const DAILY_PANEL = `
   const card=(title,v)=>"<div style=\"background:#0d1426;border-radius:8px;padding:10px\">"+esc(title)+"<b style=\"display:block;margin-top:4px\">"+esc(v)+"</b></div>";
   async function check(){
     try{
-      const r=await fetch("/api/paper/daily-learning-report?ts="+Date.now(),{cache:"no-store"});
+      const controller=new AbortController();
+      const timeout=setTimeout(()=>controller.abort(),12000);
+      const r=await fetch("/api/paper/daily-learning-report?ts="+Date.now(),{cache:"no-store",signal:controller.signal});
+      clearTimeout(timeout);
       const d=await r.json();
       if(!r.ok||d.ok===false) throw Error(d.error||("HTTP "+r.status));
       const el=id=>document.getElementById(id);
@@ -158,7 +161,8 @@ const DAILY_PANEL = `
     }catch(e){
       const status=document.getElementById("daily-report-status");
       status.textContent="✕ DAILY REPORT ERROR"; status.style.color="#ff7181";
-      document.getElementById("daily-report-summary").textContent="Lỗi: "+e.message;
+      document.getElementById("daily-report-summary").textContent=
+        e.name==="AbortError" ? "Lỗi: máy chủ báo cáo phản hồi quá lâu (>12 giây)." : "Lỗi: "+e.message;
     }
   }
   check();
@@ -184,13 +188,10 @@ function lessonForReport(report) {
 }
 
 async function dailyLearningReportApi(env) {
-  const saved = await paper(env, '/daily-report', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ dateVN: vnDate(new Date().toISOString()) })
-  });
-  const reportsRes = await paper(env, '/daily-reports?limit=14');
-  const today = saved.report || reportsRes.today;
+  // Dùng một request GET duy nhất. Endpoint /daily-reports đã tự
+  // backfill learning và cập nhật snapshot của hôm nay.
+  const reportsRes = await paper(env, '/daily-reports?limit=14', { method: 'GET' });
+  const today = reportsRes.today;
   return {
     ok:true,
     dateVN: today.dateVN,
