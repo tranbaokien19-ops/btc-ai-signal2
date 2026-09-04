@@ -1,6 +1,6 @@
 {
   "name": "btc-ai-signal2",
-  "main": "src/demo-worker.js",
+  "main": "src/step10-worker.js",
   "compatibility_date": "2026-08-31",
   "durable_objects": {
     "bindings": [
