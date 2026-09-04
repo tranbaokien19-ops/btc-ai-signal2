@@ -42,6 +42,55 @@ function snapshotPosition(p, price, at = Date.now()) {
   return { ...p, currentPrice: px, unrealizedPnl: pnl, unrealizedR: r, mfePriceMove: mfe, maePriceMove: mae, mfeR: p.riskAmount > 0 ? mfe * p.quantity / p.riskAmount : null, maeR: p.riskAmount > 0 ? mae * p.quantity / p.riskAmount : null, durationSec: Math.floor(elapsed / 1000), lastMarkedAt: new Date(at).toISOString() };
 }
 
+
+function evaluateLearning(trade) {
+  if (!trade || trade.learningEligible !== true) return null;
+  const snap = trade.signalSnapshot || {};
+  const f = snap.forecast24h || {};
+  const actualMove = Number(trade.exit) - Number(trade.entry);
+  const tolerance = Math.abs(Number(trade.entry) || 0) * 0.001;
+  const direction = String(f.direction || '');
+  const directionalOutcome = actualMove > tolerance ? 'UP' : actualMove < -tolerance ? 'DOWN' : 'FLAT';
+  const forecastDirection = direction === 'BULLISH_24H' ? 'UP' : direction === 'BEARISH_24H' ? 'DOWN' : 'FLAT';
+  const forecastDirectionCorrect = forecastDirection === directionalOutcome;
+  const sideCorrect = (trade.side === 'LONG' && directionalOutcome === 'UP') || (trade.side === 'SHORT' && directionalOutcome === 'DOWN');
+  const scenarios = snap.scenarios || {};
+  const scenario = trade.side === 'LONG' ? (String(trade.signal || '').includes('ALTERNATIVE') ? scenarios.longB : scenarios.longA) : (String(trade.signal || '').includes('ALTERNATIVE') ? scenarios.shortB : scenarios.shortA);
+  const entryLow = Number(scenario?.entryLow), entryHigh = Number(scenario?.entryHigh);
+  const entryInScenario = Number.isFinite(entryLow) && Number.isFinite(entryHigh) && Number(trade.entry) >= entryLow && Number(trade.entry) <= entryHigh;
+  const result = Number(trade.realizedPnl) > tolerance * Number(trade.quantity || 0) ? 'WIN' : Number(trade.realizedPnl) < -tolerance * Number(trade.quantity || 0) ? 'LOSS' : 'BREAKEVEN';
+  const learningScore = result === 'WIN' && forecastDirectionCorrect ? 1 : result === 'WIN' || forecastDirectionCorrect ? 0.5 : 0;
+  return {
+    tradeId: trade.id, modelVersion: 'rule-v1', evaluatedAt: nowIso(),
+    side: trade.side, signal: trade.signal, entryMode: trade.entryMode,
+    forecastDirection: direction || 'UNKNOWN', forecastBias: num(f.bias), forecastConfidence: num(f.confidence),
+    actualMove, directionalOutcome, forecastDirectionCorrect, sideCorrect, scenarioMatched: entryInScenario,
+    scenarioId: scenario?.id || null, result, realizedPnl: num(trade.realizedPnl, 0), realizedR: num(trade.realizedR, 0),
+    mfeR: num(trade.mfeR, 0), maeR: num(trade.maeR, 0), durationSec: num(trade.durationSec, 0), learningScore
+  };
+}
+function learningStats(s) {
+  const rows = Array.isArray(s.learning) ? s.learning : [];
+  const scored = rows.filter(x => Number.isFinite(x.learningScore));
+  const correct = scored.filter(x => x.forecastDirectionCorrect);
+  const wins = scored.filter(x => x.result === 'WIN');
+  return {
+    evaluated: rows.length,
+    forecastCorrect: correct.length,
+    forecastAccuracy: scored.length ? correct.length / scored.length * 100 : 0,
+    wins: wins.length,
+    winRate: scored.length ? wins.length / scored.length * 100 : 0,
+    avgLearningScore: scored.length ? scored.reduce((a,x)=>a+x.learningScore,0)/scored.length : 0,
+    modelVersion: 'rule-v1'
+  };
+}
+function recordLearning(s, closed) {
+  const row = evaluateLearning(closed);
+  if (!row) return null;
+  s.learning = [...(Array.isArray(s.learning) ? s.learning : []), row].slice(-MAX_TRADES);
+  return row;
+}
+
 function closedStats(s) {
   const closed = s.trades.filter(t => t.status === 'CLOSED');
   const wins = closed.filter(t => t.realizedPnl > 0);
@@ -59,7 +108,7 @@ export class PaperTrading extends DurableObject {
 
   async getState() {
     const s = await this.ctx.storage.get('state');
-    return s || { initialCapital: DEFAULT_CAPITAL, capital: DEFAULT_CAPITAL, realizedPnl: 0, position: null, trades: [], lastPrice: null, lastTickAt: null, engine: 'ONLINE', updatedAt: nowIso() };
+    return s || { initialCapital: DEFAULT_CAPITAL, capital: DEFAULT_CAPITAL, realizedPnl: 0, position: null, trades: [], learning: [], lastPrice: null, lastTickAt: null, engine: 'ONLINE', updatedAt: nowIso() };
   }
   async saveState(s) { s.updatedAt = nowIso(); await this.ctx.storage.put('state', s); return s; }
 
@@ -77,7 +126,7 @@ export class PaperTrading extends DurableObject {
       const closed = { ...p, status: 'CLOSED', exit: price, exitReason: 'SL', closeSource: source, closedAt: nowIso(), realizedPnl: p.unrealizedPnl, realizedR: p.unrealizedR, durationSec: Math.floor((Date.now() - new Date(p.openedAt).getTime()) / 1000) };
       s.capital += closed.realizedPnl; s.realizedPnl += closed.realizedPnl; s.position = null; s.trades = s.trades.map(t => t.id === closed.id ? closed : t);
       await this.ctx.storage.deleteAlarm();
-      return { state: s, closed };
+      const learning = recordLearning(s, closed); closed.learning = learning; s.trades = s.trades.map(t => t.id === closed.id ? closed : t); return { state: s, closed, learning };
     }
 
     if (hitTP3 || (!p.tp3 && hitTP2)) {
@@ -128,7 +177,7 @@ export class PaperTrading extends DurableObject {
     }
     if (url.pathname === '/reset' && method === 'POST') {
       const body = await request.json().catch(() => ({})); const capital = Math.max(1000, num(body.capital, DEFAULT_CAPITAL));
-      s = { initialCapital: capital, capital, realizedPnl: 0, position: null, trades: [], lastPrice: null, lastTickAt: null, engine: 'ONLINE', updatedAt: nowIso() };
+      s = { initialCapital: capital, capital, realizedPnl: 0, position: null, trades: [], learning: [], lastPrice: null, lastTickAt: null, engine: 'ONLINE', updatedAt: nowIso() };
       await this.ctx.storage.deleteAlarm(); await this.saveState(s); return Response.json({ ok: true, ...s, stats: closedStats(s) });
     }
     if (url.pathname === '/open' && method === 'POST') {
@@ -161,9 +210,10 @@ export class PaperTrading extends DurableObject {
       if (!s.position) return Response.json({ ok: false, error: 'Không có DEMO ORDER đang mở' }, { status: 409 });
       const b = await request.json().catch(() => ({})); const price = num(b.price, s.lastPrice); if (!(price > 0)) return Response.json({ ok: false, error: 'Thiếu price hợp lệ để đóng lệnh' }, { status: 400 });
       const p = snapshotPosition(s.position, price); const closed = { ...p, status: 'CLOSED', exit: price, exitReason: String(b.reason || 'MANUAL'), closeSource: 'HTTP', closedAt: nowIso(), realizedPnl: p.unrealizedPnl, realizedR: p.unrealizedR, durationSec: Math.floor((Date.now() - new Date(p.openedAt).getTime()) / 1000) };
-      s.capital += closed.realizedPnl; s.realizedPnl += closed.realizedPnl; s.position = null; s.trades = s.trades.map(t => t.id === closed.id ? closed : t); await this.ctx.storage.deleteAlarm(); await this.saveState(s);
-      return Response.json({ ok: true, closed, ...s, equity: s.capital, stats: closedStats(s) });
+      s.capital += closed.realizedPnl; s.realizedPnl += closed.realizedPnl; s.position = null; s.trades = s.trades.map(t => t.id === closed.id ? closed : t); const learning = recordLearning(s, closed); closed.learning = learning; s.trades = s.trades.map(t => t.id === closed.id ? closed : t); await this.ctx.storage.deleteAlarm(); await this.saveState(s);
+      return Response.json({ ok: true, closed, learning, learningStats: learningStats(s), ...s, equity: s.capital, stats: closedStats(s) });
     }
+    if (url.pathname === '/learning' && method === 'GET') { const limit = Math.max(1, Math.min(200, Math.floor(num(url.searchParams.get('limit'), 50)))); return Response.json({ ok: true, learning: (s.learning || []).slice(-limit), stats: learningStats(s), updatedAt: s.updatedAt }); }
     if (url.pathname === '/history' && method === 'GET') {
       const limit = Math.max(1, Math.min(200, Math.floor(num(url.searchParams.get('limit'), 50))));
       return Response.json({ ok: true, trades: s.trades.slice(-limit), stats: closedStats(s), updatedAt: s.updatedAt });
