@@ -3,6 +3,7 @@ import baseWorker from './demo-worker.js';
 const MODEL_ACTIVE = 'rule-v1';
 const MODEL_CANDIDATE = 'rule-v2-shadow';
 const MIN_EVAL_TRADES = 20;
+const PAPER_LEVERAGE = 3;
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -94,7 +95,7 @@ function evaluate(rows) {
     && candidate.maxDrawdown <= active.maxDrawdown
     && candidate.forecastAccuracy >= active.forecastAccuracy;
 
-  const decision = candidateBetter ? 'PROMOTE_CANDIDATE' : 'KEEP_CURRENT';
+  const decision = candidateBetter ? 'PROMOTE_READY' : 'KEEP_CURRENT';
   const reason = !enoughData
     ? `Chưa đủ mẫu: cần ${MIN_EVAL_TRADES}, hiện có ${base.length}`
     : candidateBetter
@@ -110,29 +111,49 @@ function evaluate(rows) {
     candidate,
     decision,
     reason,
-    promotionGuard: 'Không tự đổi model nếu chưa đủ mẫu hoặc candidate không vượt toàn bộ tiêu chí.',
+    promotionGuard: 'Chỉ promote khi đủ mẫu và candidate vượt toàn bộ tiêu chí; không thay model sớm.',
+    modelHistory: [
+      { version: MODEL_ACTIVE, status: 'ACTIVE' },
+      { version: MODEL_CANDIDATE, status: candidateBetter ? 'PROMOTE_READY' : 'CANDIDATE_SHADOW' }
+    ],
     evaluatedAt: new Date().toISOString()
   };
 }
 
-const PANEL = `<div id="model-evaluation" style="margin-top:18px;background:#121a2f;border:1px solid #293756;border-radius:12px;padding:16px"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>BƯỚC 10 — KIỂM ĐỊNH MODEL</b><span id="model-status" style="color:#94a3c5">Đang kiểm tra...</span></div><div id="model-grid" style="display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:8px;margin-top:12px"></div><div id="model-decision" style="margin-top:10px;padding:10px 12px;border-radius:8px;background:#0a1122;border:1px solid #293756;color:#d7e0f2;line-height:1.55">Đang tải...</div><div style="margin-top:8px;color:#94a3c5;font-size:12px">Candidate là shadow model để kiểm định trên chính các lệnh DEMO đã đóng. Chưa đủ bằng chứng thì không thay Active.</div></div><style>@media(max-width:900px){#model-grid{grid-template-columns:repeat(2,minmax(150px,1fr))!important}}@media(max-width:600px){#model-grid{grid-template-columns:1fr!important}}</style><script>(async()=>{const f=n=>Number.isFinite(Number(n))?Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'--';const pct=n=>Number.isFinite(Number(n))?Number(n).toFixed(2)+'%':'--';const card=(title,v)=>'<div style="background:#0d1426;border-radius:8px;padding:10px">'+title+'<b style="display:block;margin-top:4px">'+v+'</b></div>';async function check(){try{const r=await fetch('/api/paper/model-evaluation?ts='+Date.now(),{cache:'no-store'}),d=await r.json();if(!r.ok||d.ok===false)throw Error(d.error||('HTTP '+r.status));const a=d.active,c=d.candidate;document.getElementById('model-status').textContent='✓ MODEL EVALUATOR ONLINE';document.getElementById('model-status').style.color='#55dc92';document.getElementById('model-grid').innerHTML=card('Active',a.model)+card('Candidate',c.model)+card('Mẫu kiểm định',d.evaluatedTrades+'/'+d.minimumTrades)+card('Quyết định',d.decision)+card('Active P&L',f(a.pnl))+card('Candidate Shadow P&L',f(c.pnl))+card('Active Avg R',Number(a.avgR).toFixed(2)+'R')+card('Candidate Avg R',Number(c.avgR).toFixed(2)+'R')+card('Active PF',a.profitFactor==null?'∞':Number(a.profitFactor).toFixed(2))+card('Candidate PF',c.profitFactor==null?'∞':Number(c.profitFactor).toFixed(2))+card('Active DD',f(a.maxDrawdown))+card('Candidate DD',f(c.maxDrawdown))+card('Active Accuracy',pct(a.forecastAccuracy))+card('Candidate Accuracy',pct(c.forecastAccuracy))+card('Candidate Coverage',pct(c.coverage));document.getElementById('model-decision').textContent=(d.decision==='PROMOTE_CANDIDATE'?'✓ Candidate đủ điều kiện để xem xét promote.':'⏸ Giữ Active: ')+d.reason}catch(e){document.getElementById('model-status').textContent='✕ MODEL EVALUATOR ERROR';document.getElementById('model-status').style.color='#ff7181';document.getElementById('model-decision').textContent='Lỗi: '+e.message}}check();setInterval(check,10000)})();</script>`;
+const PANEL = `<div id="model-evaluation" style="margin-top:18px;background:#121a2f;border:1px solid #293756;border-radius:12px;padding:16px"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><b>BƯỚC 10 — KIỂM ĐỊNH MODEL</b><span id="model-status" style="color:#94a3c5">Đang kiểm tra...</span></div><div id="model-grid" style="display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:8px;margin-top:12px"></div><div id="model-decision" style="margin-top:10px;padding:10px 12px;border-radius:8px;background:#0a1122;border:1px solid #293756;color:#d7e0f2;line-height:1.55">Đang tải...</div><div style="margin-top:8px;color:#94a3c5;font-size:12px">Candidate là shadow model để kiểm định trên chính các lệnh DEMO đã đóng. Chưa đủ bằng chứng thì không thay Active.</div></div><style>@media(max-width:900px){#model-grid{grid-template-columns:repeat(2,minmax(150px,1fr))!important}}@media(max-width:600px){#model-grid{grid-template-columns:1fr!important}}</style><script>(async()=>{const f=n=>Number.isFinite(Number(n))?Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'--';const pct=n=>Number.isFinite(Number(n))?Number(n).toFixed(2)+'%':'--';const card=(title,v)=>'<div style="background:#0d1426;border-radius:8px;padding:10px">'+title+'<b style="display:block;margin-top:4px">'+v+'</b></div>';async function check(){try{const r=await fetch('/api/paper/model-evaluation?ts='+Date.now(),{cache:'no-store'}),d=await r.json();if(!r.ok||d.ok===false)throw Error(d.error||('HTTP '+r.status));const a=d.active,c=d.candidate;document.getElementById('model-status').textContent='✓ MODEL EVALUATOR ONLINE';document.getElementById('model-status').style.color='#55dc92';document.getElementById('model-grid').innerHTML=card('Active',a.model)+card('Candidate',c.model)+card('Mẫu kiểm định',d.evaluatedTrades+'/'+d.minimumTrades)+card('Quyết định',d.decision)+card('Active P&L',f(a.pnl))+card('Candidate Shadow P&L',f(c.pnl))+card('Active Avg R',Number(a.avgR).toFixed(2)+'R')+card('Candidate Avg R',Number(c.avgR).toFixed(2)+'R')+card('Active PF',a.profitFactor==null?'∞':Number(a.profitFactor).toFixed(2))+card('Candidate PF',c.profitFactor==null?'∞':Number(c.profitFactor).toFixed(2))+card('Active DD',f(a.maxDrawdown))+card('Candidate DD',f(c.maxDrawdown))+card('Active Accuracy',pct(a.forecastAccuracy))+card('Candidate Accuracy',pct(c.forecastAccuracy))+card('Candidate Coverage',pct(c.coverage));document.getElementById('model-decision').textContent=(d.decision==='PROMOTE_READY'?'✓ Candidate đạt điều kiện promote nhưng chưa tự áp dụng.':'⏸ Giữ Active: ')+d.reason}catch(e){document.getElementById('model-status').textContent='✕ MODEL EVALUATOR ERROR';document.getElementById('model-status').style.color='#ff7181';document.getElementById('model-decision').textContent='Lỗi: '+e.message}}check();setInterval(check,10000)})();</script>`;
 
 async function modelEvaluation(env) {
   const learning = await paper(env, '/learning?limit=200');
   const rows = Array.isArray(learning.learning) ? learning.learning : [];
-  return { ok: true, ...evaluate(rows), source: 'DEMO closed trades / AI learning' };
+  return { ok: true, ...evaluate(rows), paperLeverage: PAPER_LEVERAGE, source: 'DEMO closed trades / AI learning' };
+}
+
+async function forwardOpenWithLeverage(request) {
+  const body = await request.json().catch(() => ({}));
+  body.leverage = PAPER_LEVERAGE;
+  return new Request(request, {
+    method: 'POST',
+    body: JSON.stringify(body),
+    headers: new Headers({ ...Object.fromEntries(request.headers), 'content-type': 'application/json' })
+  });
 }
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
     if (url.pathname === '/api/paper/model-evaluation') {
       try { return json(await modelEvaluation(env)); }
       catch (e) { return json({ ok: false, error: e?.message || 'Model evaluation error' }, 502); }
     }
 
-    const response = await baseWorker.fetch(request, env, ctx);
+    const forwarded = url.pathname === '/api/paper/open' && request.method.toUpperCase() === 'POST'
+      ? await forwardOpenWithLeverage(request)
+      : request;
+
+    const response = await baseWorker.fetch(forwarded, env, ctx);
     if (url.pathname !== '/' || !response.headers.get('content-type')?.includes('text/html')) return response;
+
     const html = await response.text();
     const injected = html.includes('id="model-evaluation"') ? html : html.replace('</main>', PANEL + '</main>');
     const out = new Response(injected, response);
