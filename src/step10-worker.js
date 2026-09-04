@@ -138,7 +138,7 @@ const DAILY_REPORT_SCRIPT = `
 (function(){
   const f=n=>Number.isFinite(Number(n))?Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}):"--";
   const pct=n=>Number.isFinite(Number(n))?Number(n).toFixed(2)+"%":"--";
-  const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}[m]));
+  const esc=v=>String(v??"").replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m])).replace(/'/g,"&#39;");
   const card=(title,v)=>"<div style=\"background:#0d1426;border-radius:8px;padding:10px\">"+esc(title)+"<b style=\"display:block;margin-top:4px\">"+esc(v)+"</b></div>";
   async function load(){
     const status=document.getElementById("daily-report-status");
