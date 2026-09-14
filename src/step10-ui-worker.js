@@ -24,7 +24,8 @@ const TRADE_TABLE_PANEL = `
   <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
     <b>LỆNH AI — THẮNG / THUA</b><span id="ai-trade-status" style="color:#94a3c5">Đang tải...</span>
   </div>
-  <div id="ai-trade-summary" style="display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:8px;margin-top:12px"></div>
+  <div id="ai-trade-warning" style="display:none;margin-top:10px;padding:11px 12px;border-radius:8px;background:#2a1117;border:1px solid #7b2f3b;color:#ff9aa6;line-height:1.55"></div>
+  <div id="ai-trade-summary" style="display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:8px;margin-top:12px"></div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
     <div style="background:#0a1122;border:1px solid #293756;border-radius:10px;padding:12px">
       <div style="font-weight:700;color:#55dc92;margin-bottom:8px">✓ LỆNH THẮNG</div>
@@ -46,7 +47,8 @@ const TRADE_TABLE_PANEL = `
 .ai-win{color:#55dc92!important;font-weight:700}
 .ai-loss{color:#ff7181!important;font-weight:700}
 .ai-neutral{color:#f4ca58!important;font-weight:700}
-@media(max-width:900px){#ai-trade-results>div:nth-of-type(2){grid-template-columns:1fr!important}#ai-trade-summary{grid-template-columns:repeat(2,minmax(140px,1fr))!important}}
+@media(max-width:1000px){#ai-trade-results>div:nth-of-type(3){grid-template-columns:1fr!important}#ai-trade-summary{grid-template-columns:repeat(3,minmax(140px,1fr))!important}}
+@media(max-width:900px){#ai-trade-summary{grid-template-columns:repeat(2,minmax(140px,1fr))!important}}
 @media(max-width:600px){#ai-trade-summary{grid-template-columns:1fr!important}.ai-trade-table{font-size:11px}}
 </style>
 <script>
@@ -54,8 +56,9 @@ const TRADE_TABLE_PANEL = `
   const $=id=>document.getElementById(id);
   const f=n=>Number.isFinite(Number(n))?Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'--';
   const r=n=>Number.isFinite(Number(n))?Number(n).toFixed(2)+'R':'--';
+  const pct=n=>Number.isFinite(Number(n))?Number(n).toFixed(2)+'%':'--';
   const date=v=>{const d=new Date(v);return Number.isFinite(d.getTime())?d.toLocaleString('vi-VN',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'--'};
-  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const esc=v=>String(v??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
   const card=(title,value)=>'<div style="background:#0d1426;border-radius:8px;padding:10px">'+title+'<b style="display:block;margin-top:4px">'+value+'</b></div>';
   function table(rows,kind){
     if(!rows.length)return '<div style="color:#94a3c5;padding:8px 0">Chưa có lệnh '+(kind==='WIN'?'thắng':'thua')+'.</div>';
@@ -72,10 +75,21 @@ const TRADE_TABLE_PANEL = `
       const rows=Array.isArray(d.trades)?d.trades:[];
       const wins=rows.filter(x=>x.result==='WIN'),losses=rows.filter(x=>x.result==='LOSS');
       const pnl=rows.reduce((a,x)=>a+(Number(x.realizedPnl)||0),0);
-      $('ai-trade-status').textContent='✓ '+rows.length+' lệnh AI đã đóng';$('ai-trade-status').style.color='#55dc92';
-      $('ai-trade-summary').innerHTML=card('Tổng lệnh học',rows.length)+card('Lệnh thắng',wins.length)+card('Lệnh thua',losses.length)+card('P&L',f(pnl));
+      const winRate=rows.length?wins.length/rows.length*100:0;
+      const grossProfit=wins.reduce((a,x)=>a+(Number(x.realizedPnl)||0),0);
+      const grossLoss=Math.abs(losses.reduce((a,x)=>a+(Number(x.realizedPnl)||0),0));
+      const pf=grossLoss>0?grossProfit/grossLoss:(grossProfit>0?null:0);
+      $('ai-trade-status').textContent='✓ '+rows.length+' lệnh AI đã đóng';$('ai-trade-status').style.color=winRate>=50?'#55dc92':'#ff7181';
+      $('ai-trade-summary').innerHTML=card('Tổng lệnh học',rows.length)+card('Lệnh thắng',wins.length)+card('Lệnh thua',losses.length)+card('Tỷ lệ thắng',pct(winRate))+card('P&L',f(pnl));
+      const warning=$('ai-trade-warning');
+      if(rows.length>=5 && (winRate<50 || pnl<0 || (pf!==null && pf<1))){
+        warning.style.display='block';
+        warning.textContent='⚠ CẢNH BÁO CHẤT LƯỢNG AI: '+wins.length+' thắng / '+losses.length+' thua | Win rate '+pct(winRate)+' | P&L '+f(pnl)+' | Profit Factor '+(pf===null?'∞':f(pf))+'. Model hiện tại CHƯA ĐƯỢC COI LÀ ĐẠT để dùng lệnh thật. Cần tiếp tục kiểm định và sửa logic vào lệnh trước khi liên kết Binance.';
+      }else{
+        warning.style.display='none';
+      }
       $('ai-winning-trades').innerHTML=table(wins,'WIN');$('ai-losing-trades').innerHTML=table(losses,'LOSS');
-    }catch(e){$('ai-trade-status').textContent='✕ Lỗi tải dữ liệu';$('ai-trade-status').style.color='#ff7181';$('ai-winning-trades').textContent='Lỗi: '+e.message;$('ai-losing-trades').textContent='Lỗi: '+e.message;}
+    }catch(e){$('ai-trade-status').textContent='✕ Lỗi tải dữ liệu';$('ai-trade-status').style.color='#ff7181';$('ai-trade-warning').style.display='block';$('ai-trade-warning').textContent='Lỗi: '+e.message;$('ai-winning-trades').textContent='Lỗi: '+e.message;$('ai-losing-trades').textContent='Lỗi: '+e.message;}
   }
   load();setInterval(load,10000);
 })();
